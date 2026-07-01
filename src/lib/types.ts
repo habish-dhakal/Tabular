@@ -64,6 +64,8 @@ export interface RecordDTO {
   tableId: string;
   cells: Record<string, unknown>;
   position: number;
+  createdBy?: string | null;
+  updatedBy?: string | null;
   createdAt: string;
   updatedAt: string;
 }

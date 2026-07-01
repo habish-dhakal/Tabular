@@ -10,6 +10,7 @@ import { Popover } from "@/components/ui/Popover";
 import { CellDisplay, CellEditor } from "@/components/Cell";
 import { FIELD_TYPE_META, isComputed, type SelectChoice } from "@/lib/fields";
 import { applyFilterSort, groupRecords } from "@/lib/query";
+import { computeCellValue } from "@/lib/compute";
 import type { FieldDTO, RecordDTO } from "@/lib/types";
 
 const GUTTER_W = 56;
@@ -28,7 +29,7 @@ export function GridView() {
     fields, records, config, commitCell, addRecord, deleteRecord, addField,
   } = useTable();
   const parentRef = useRef<HTMLDivElement>(null);
-  const [editing, setEditing] = useState<{ recordId: string; fieldId: string } | null>(null);
+  const [editing, setEditing] = useState<{ recordId: string; fieldId: string; rect?: DOMRect } | null>(null);
 
   const rowH = ROW_HEIGHTS[config.rowHeight ?? "short"];
   const hidden = new Set(config.hiddenFieldIds ?? []);
@@ -106,7 +107,7 @@ export function GridView() {
                   <button onClick={() => deleteRecord(record.id)} className="hidden text-muted hover:text-red-600 group-hover:block"><Trash2 size={13} /></button>
                 </div>
                 {visibleFields.map((f) => {
-                  const value = record.cells[f.id];
+                  const value = computeCellValue(f, record, fields);
                   const isEditing = editing?.recordId === record.id && editing?.fieldId === f.id;
                   const computed = isComputed(f.type);
                   if (f.type === "checkbox") {
@@ -119,12 +120,12 @@ export function GridView() {
                   return (
                     <div
                       key={f.id}
-                      onClick={() => !computed && !isEditing && setEditing({ recordId: record.id, fieldId: f.id })}
+                      onClick={(e) => !computed && !isEditing && setEditing({ recordId: record.id, fieldId: f.id, rect: e.currentTarget.getBoundingClientRect() })}
                       className={"flex items-center overflow-hidden border-r border-border-token px-2 text-sm " + (computed ? "bg-surface/40 text-muted" : "cursor-text")}
                       style={{ width: colWidth(f) }}
                     >
                       {isEditing ? (
-                        <CellEditor field={f} value={value} onCommit={(v) => { commitCell(record.id, f.id, v); setEditing(null); }} onCancel={() => setEditing(null)} />
+                        <CellEditor field={f} value={record.cells[f.id]} anchorRect={editing?.rect} onCommit={(v) => { commitCell(record.id, f.id, v); setEditing(null); }} onCancel={() => setEditing(null)} />
                       ) : (
                         <CellDisplay field={f} value={value} />
                       )}

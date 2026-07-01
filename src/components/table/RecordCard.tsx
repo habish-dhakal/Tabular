@@ -2,6 +2,7 @@
 
 import { useTable } from "@/components/table/TableProvider";
 import { CellDisplay } from "@/components/Cell";
+import { computeCellValue } from "@/lib/compute";
 import type { RecordDTO } from "@/lib/types";
 
 /** Compact record card used in kanban / gallery / calendar. */
@@ -33,11 +34,11 @@ export function RecordCard({
       className="cursor-pointer rounded-lg border border-border-token bg-background p-2.5 shadow-sm transition hover:border-accent hover:shadow"
     >
       <div className="mb-1 truncate text-sm font-medium">
-        {primary ? <CellDisplay field={primary} value={record.cells[primary.id]} /> : "—"}
+        {primary ? <CellDisplay field={primary} value={computeCellValue(primary, record, fields)} /> : "—"}
       </div>
       <div className="space-y-1">
         {others.map((f) => {
-          const v = record.cells[f.id];
+          const v = computeCellValue(f, record, fields);
           if (v === undefined || v === null || v === "") return null;
           return (
             <div key={f.id} className="flex items-center gap-1.5 text-xs text-muted">

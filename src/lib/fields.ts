@@ -86,7 +86,15 @@ export function coerceCellValue(
     case "checkbox":
       return Boolean(value);
 
-    case "date":
+    case "date": {
+      // Store date-only ("YYYY-MM-DD") so it never shifts across timezones.
+      const s = String(value);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      const d = new Date(s);
+      if (Number.isNaN(d.getTime())) throw new Error("Invalid date");
+      const p = (n: number) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    }
     case "dateTime": {
       const d = new Date(value as string);
       if (Number.isNaN(d.getTime())) throw new Error("Invalid date");

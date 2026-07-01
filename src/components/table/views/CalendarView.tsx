@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useTable } from "@/components/table/TableProvider";
 import { RecordModal } from "@/components/table/RecordModal";
 import { CellDisplay } from "@/components/Cell";
+import { computeCellValue } from "@/lib/compute";
 import { applyFilterSort } from "@/lib/query";
 import type { RecordDTO } from "@/lib/types";
 
@@ -101,7 +102,7 @@ export function CalendarView() {
                     onClick={() => setOpen(r)}
                     className="block w-full truncate rounded bg-accent/10 px-1.5 py-0.5 text-left text-xs text-accent hover:bg-accent/20"
                   >
-                    {primary ? <CellDisplay field={primary} value={r.cells[primary.id]} /> : "Record"}
+                    {primary ? <CellDisplay field={primary} value={computeCellValue(primary, r, fields)} /> : "Record"}
                   </button>
                 ))}
               </div>

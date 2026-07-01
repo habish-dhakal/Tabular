@@ -7,6 +7,8 @@ import type { FieldDTO } from "@/lib/types";
 import type { FieldType } from "@/server/db/schema";
 import { fieldTypes } from "@/server/db/schema";
 import { FIELD_TYPE_META, SELECT_COLORS, type SelectChoice } from "@/lib/fields";
+import { validateFormula } from "@/lib/formula";
+import { useTable } from "@/components/table/TableProvider";
 
 const NON_CREATABLE: FieldType[] = ["lookup", "rollup"]; // need relations first
 
@@ -89,18 +91,27 @@ export function FieldEditor({
   onSave: (data: { name: string; type: FieldType; options: Record<string, unknown> }) => void;
   onClose: () => void;
 }) {
+  const { fields } = useTable();
   const [name, setName] = useState(field?.name ?? "");
   const [type, setType] = useState<FieldType>(field?.type ?? "singleLineText");
   const [choices, setChoices] = useState<SelectChoice[]>(
     (field?.options.choices as SelectChoice[]) ?? []
   );
+  const [expression, setExpression] = useState<string>(
+    (field?.options.expression as string) ?? ""
+  );
 
   const isSelect = type === "singleSelect" || type === "multiSelect";
+  const isFormula = type === "formula";
+  const formulaError = isFormula && expression.trim() ? validateFormula(expression) : null;
+  const otherFields = fields.filter((f) => f.id !== field?.id);
 
   function save() {
     if (!name.trim()) return;
+    if (isFormula && formulaError) return;
     const options: Record<string, unknown> = { ...(field?.options ?? {}) };
     if (isSelect) options.choices = choices;
+    if (isFormula) options.expression = expression;
     onSave({ name: name.trim(), type, options });
     onClose();
   }
@@ -139,6 +150,38 @@ export function FieldEditor({
         <div>
           <label className="mb-1 block text-xs font-medium text-muted">Options</label>
           <ChoiceEditor choices={choices} onChange={setChoices} />
+        </div>
+      )}
+      {isFormula && (
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted">Formula</label>
+          <textarea
+            value={expression}
+            onChange={(e) => setExpression(e.target.value)}
+            placeholder={'e.g.  {Price} * {Qty}   or   IF({Done}, "✓", "…")'}
+            className="h-20 w-full resize-y rounded-lg border border-border-token px-2 py-1.5 font-mono text-xs outline-none focus:border-accent"
+          />
+          {formulaError && <p className="mt-1 text-xs text-red-600">{formulaError}</p>}
+          {otherFields.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {otherFields.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setExpression((e) => `${e}{${f.name}}`)}
+                  className="rounded border border-border-token px-1.5 py-0.5 text-[11px] text-muted hover:border-accent hover:text-accent"
+                >
+                  {`{${f.name}}`}
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
+            Text: CONCATENATE, LEFT/RIGHT/MID, LEN, UPPER/LOWER, TRIM, SUBSTITUTE, REPLACE, SEARCH · Logic:
+            IF, SWITCH, AND, OR, NOT, ISERROR, IFERROR · Math: ROUND(UP/DOWN), INT, ABS, SQRT, POWER, MOD,
+            MIN/MAX/SUM/AVERAGE · Date: TODAY, NOW, DATEADD, DATETIME_DIFF, DATETIME_FORMAT, YEAR/MONTH/DAY,
+            WEEKDAY · Use &amp; to join text.
+          </p>
         </div>
       )}
       <div className="flex justify-end gap-2 pt-1">

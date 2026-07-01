@@ -5,6 +5,7 @@ import { X } from "lucide-react";
 import { useTable } from "@/components/table/TableProvider";
 import { CellDisplay, CellEditor } from "@/components/Cell";
 import { FIELD_TYPE_META, isComputed } from "@/lib/fields";
+import { computeCellValue } from "@/lib/compute";
 import type { RecordDTO } from "@/lib/types";
 
 export function RecordModal({ record, onClose }: { record: RecordDTO; onClose: () => void }) {
@@ -26,7 +27,7 @@ export function RecordModal({ record, onClose }: { record: RecordDTO; onClose: (
         </div>
         <div className="max-h-[70vh] space-y-3 overflow-auto p-4">
           {fields.map((f) => {
-            const value = live.cells[f.id];
+            const value = computeCellValue(f, live, fields);
             const computed = isComputed(f.type);
             const editing = editingField === f.id;
             return (
@@ -37,7 +38,7 @@ export function RecordModal({ record, onClose }: { record: RecordDTO; onClose: (
                 {f.type === "checkbox" ? (
                   <input type="checkbox" checked={!!value} onChange={(e) => commitCell(live.id, f.id, e.target.checked)} className="mt-1 h-4 w-4 accent-[var(--accent)]" />
                 ) : editing ? (
-                  <CellEditor field={f} value={value} onCommit={(v) => { commitCell(live.id, f.id, v); setEditingField(null); }} onCancel={() => setEditingField(null)} />
+                  <CellEditor field={f} value={live.cells[f.id]} onCommit={(v) => { commitCell(live.id, f.id, v); setEditingField(null); }} onCancel={() => setEditingField(null)} />
                 ) : (
                   <div
                     onClick={() => !computed && setEditingField(f.id)}
