@@ -9,7 +9,8 @@ import {
   useRef,
   useState,
 } from "react";
-import type { FieldDTO, RecordDTO, TableBundle, ViewConfig, ViewDTO } from "@/lib/types";
+import type { FieldDTO, RecordDTO, TableBundle, TableDTO, ViewConfig, ViewDTO } from "@/lib/types";
+import type { LinkChip } from "@/components/cell-editors/LinkPicker";
 import type { FieldType, ViewType } from "@/server/db/schema";
 import { FIELD_TYPE_META } from "@/lib/fields";
 
@@ -24,9 +25,11 @@ interface TableCtx {
   config: ViewConfig;
   updateConfig: (patch: Partial<ViewConfig>) => void;
 
+  tables: TableDTO[]; // sibling tables in the base (for link fields)
   commitCell: (recordId: string, fieldId: string, value: unknown) => Promise<void>;
   addRecord: (cells?: Record<string, unknown>) => Promise<RecordDTO | null>;
   deleteRecord: (recordId: string) => Promise<void>;
+  setRecordLinks: (recordId: string, fieldId: string, chips: LinkChip[]) => Promise<void>;
 
   addField: (name: string, type: FieldType, options?: Record<string, unknown>) => Promise<void>;
   updateField: (fieldId: string, patch: Partial<FieldDTO>) => Promise<void>;
@@ -51,6 +54,7 @@ export function TableProvider({ tableId, children }: { tableId: string; children
   const [fields, setFields] = useState<FieldDTO[]>([]);
   const [records, setRecords] = useState<RecordDTO[]>([]);
   const [views, setViews] = useState<ViewDTO[]>([]);
+  const [tables, setTables] = useState<TableDTO[]>([]);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -67,6 +71,10 @@ export function TableProvider({ tableId, children }: { tableId: string; children
       setActiveViewId(bundle.views[0]?.id ?? null);
       setRecords(recs.records ?? []);
       setLoading(false);
+      // Sibling tables in the base — used as link targets.
+      fetch(`/api/bases/${bundle.table.baseId}/tables`)
+        .then((r) => r.json())
+        .then((d) => alive && setTables(d.tables ?? []));
     });
     return () => {
       alive = false;
@@ -137,6 +145,18 @@ export function TableProvider({ tableId, children }: { tableId: string; children
   const deleteRecord = useCallback(async (recordId: string) => {
     setRecords((prev) => prev.filter((r) => r.id !== recordId));
     await fetch(`/api/records/${recordId}`, { method: "DELETE" });
+  }, []);
+
+  const setRecordLinks = useCallback(async (recordId: string, fieldId: string, chips: LinkChip[]) => {
+    // Optimistically set the resolved chips into cells (matches server enrichment).
+    setRecords((prev) =>
+      prev.map((r) => (r.id === recordId ? { ...r, cells: { ...r.cells, [fieldId]: chips } } : r))
+    );
+    await fetch(`/api/records/${recordId}/links`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ fieldId, targetIds: chips.map((c) => c.id) }),
+    });
   }, []);
 
   /* ---- field mutations ---- */
@@ -240,9 +260,9 @@ export function TableProvider({ tableId, children }: { tableId: string; children
   );
 
   const value: TableCtx = {
-    loading, table, fields, records, views, activeView,
+    loading, table, fields, records, views, activeView, tables,
     setActiveViewId, config, updateConfig,
-    commitCell, addRecord, deleteRecord,
+    commitCell, addRecord, deleteRecord, setRecordLinks,
     addField, updateField, deleteField, reorderFields,
     createView, deleteView,
   };

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { handle, requireUserId } from "@/server/api-helpers";
 import { assertTableAccess } from "@/server/services/access";
 import { countRecords, createRecord, listRecords } from "@/server/services/records";
+import { enrichRecordsWithLinks } from "@/server/services/links";
 
 type Params = { params: Promise<{ tableId: string }> };
 
@@ -17,6 +18,8 @@ export async function GET(req: Request, { params }: Params) {
       listRecords(tableId, limit, offset),
       countRecords(tableId),
     ]);
+    // Resolve link fields into cells[fieldId] = LinkChip[] for display.
+    await enrichRecordsWithLinks(tableId, records as { id: string; cells: Record<string, unknown> }[]);
     return { records, total };
   });
 }

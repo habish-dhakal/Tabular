@@ -112,6 +112,20 @@ export function CellDisplay({ field, value, expanded }: { field: FieldDTO; value
         <span className={textCls}>{String(value)}</span>
       );
 
+    case "link": {
+      const chips = Array.isArray(value) ? (value as { id: string; label: string }[]) : [];
+      if (chips.length === 0) return <span className="text-transparent">·</span>;
+      return (
+        <span className={expanded ? "flex flex-wrap gap-1" : "flex gap-1 overflow-hidden"}>
+          {chips.map((c) => (
+            <span key={c.id} className="inline-flex max-w-full items-center gap-1 truncate rounded bg-surface px-1.5 py-0.5 text-xs">
+              <span className="truncate">{c.label}</span>
+            </span>
+          ))}
+        </span>
+      );
+    }
+
     case "formula": {
       if (typeof value === "boolean") return <span>{value ? "true" : "false"}</span>;
       const s = String(value);

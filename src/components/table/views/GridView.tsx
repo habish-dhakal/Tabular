@@ -8,6 +8,7 @@ import { FieldHeaderMenu } from "@/components/table/FieldHeaderMenu";
 import { FieldEditor } from "@/components/table/FieldEditor";
 import { Popover } from "@/components/ui/Popover";
 import { CellPopover } from "@/components/cell-editors/CellPopover";
+import { LinkPicker, type LinkChip } from "@/components/cell-editors/LinkPicker";
 import { CellDisplay, CellEditor } from "@/components/Cell";
 import { FIELD_TYPE_META, isComputed, type SelectChoice } from "@/lib/fields";
 import { applyFilterSort, groupRecords } from "@/lib/query";
@@ -27,7 +28,7 @@ type Item =
 
 export function GridView() {
   const {
-    fields, records, config, commitCell, addRecord, deleteRecord, addField,
+    fields, records, config, commitCell, addRecord, deleteRecord, addField, setRecordLinks,
   } = useTable();
   const parentRef = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState<{ recordId: string; fieldId: string; rect?: DOMRect } | null>(null);
@@ -131,7 +132,18 @@ export function GridView() {
                       style={{ width: colWidth(f) }}
                     >
                       {isEditing ? (
-                        <CellEditor field={f} value={record.cells[f.id]} anchorRect={editing?.rect} onChange={(v) => commitCell(record.id, f.id, v)} onCommit={(v) => { commitCell(record.id, f.id, v); setEditing(null); }} onCancel={() => setEditing(null)} />
+                        f.type === "link" ? (
+                          <CellPopover anchorRect={editing!.rect!} onClose={() => setEditing(null)} minWidth={260}>
+                            <LinkPicker
+                              field={f}
+                              value={(record.cells[f.id] as LinkChip[]) ?? []}
+                              onChange={(chips) => setRecordLinks(record.id, f.id, chips)}
+                              onClose={() => setEditing(null)}
+                            />
+                          </CellPopover>
+                        ) : (
+                          <CellEditor field={f} value={record.cells[f.id]} anchorRect={editing?.rect} onChange={(v) => commitCell(record.id, f.id, v)} onCommit={(v) => { commitCell(record.id, f.id, v); setEditing(null); }} onCancel={() => setEditing(null)} />
+                        )
                       ) : (
                         <CellDisplay field={f} value={value} />
                       )}

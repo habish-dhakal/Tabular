@@ -4,12 +4,14 @@ import { useState } from "react";
 import { X } from "lucide-react";
 import { useTable } from "@/components/table/TableProvider";
 import { CellDisplay, CellEditor } from "@/components/Cell";
+import { CellPopover } from "@/components/cell-editors/CellPopover";
+import { LinkPicker, type LinkChip } from "@/components/cell-editors/LinkPicker";
 import { FIELD_TYPE_META, isComputed } from "@/lib/fields";
 import { computeCellValue } from "@/lib/compute";
 import type { RecordDTO } from "@/lib/types";
 
 export function RecordModal({ record, onClose }: { record: RecordDTO; onClose: () => void }) {
-  const { fields, commitCell, records } = useTable();
+  const { fields, commitCell, records, setRecordLinks } = useTable();
   const [editing, setEditing] = useState<{ fieldId: string; rect: DOMRect } | null>(null);
 
   // Always read the freshest copy from context.
@@ -37,6 +39,15 @@ export function RecordModal({ record, onClose }: { record: RecordDTO; onClose: (
                 </div>
                 {f.type === "checkbox" ? (
                   <input type="checkbox" checked={!!value} onChange={(e) => commitCell(live.id, f.id, e.target.checked)} className="mt-1 h-4 w-4 accent-[var(--accent)]" />
+                ) : isEditing && f.type === "link" ? (
+                  <CellPopover anchorRect={editing!.rect} onClose={() => setEditing(null)} minWidth={260}>
+                    <LinkPicker
+                      field={f}
+                      value={(live.cells[f.id] as LinkChip[]) ?? []}
+                      onChange={(chips) => setRecordLinks(live.id, f.id, chips)}
+                      onClose={() => setEditing(null)}
+                    />
+                  </CellPopover>
                 ) : isEditing ? (
                   <CellEditor
                     field={f}

@@ -12,7 +12,7 @@ import { useTable } from "@/components/table/TableProvider";
 
 // Types without a proper editor yet — hidden from the picker until built,
 // so users can't create a field that falls back to a broken text input.
-const NON_CREATABLE: FieldType[] = ["link", "lookup", "rollup", "attachment", "user"];
+const NON_CREATABLE: FieldType[] = ["lookup", "rollup", "attachment", "user"];
 
 function ChoiceEditor({
   choices,
@@ -93,7 +93,7 @@ export function FieldEditor({
   onSave: (data: { name: string; type: FieldType; options: Record<string, unknown> }) => void;
   onClose: () => void;
 }) {
-  const { fields } = useTable();
+  const { fields, tables, table } = useTable();
   const [name, setName] = useState(field?.name ?? "");
   const [type, setType] = useState<FieldType>(field?.type ?? "singleLineText");
   const [choices, setChoices] = useState<SelectChoice[]>(
@@ -102,18 +102,28 @@ export function FieldEditor({
   const [expression, setExpression] = useState<string>(
     (field?.options.expression as string) ?? ""
   );
+  const [linkedTableId, setLinkedTableId] = useState<string>(
+    (field?.options.linkedTableId as string) ?? tables[0]?.id ?? ""
+  );
+  const [allowMultiple, setAllowMultiple] = useState<boolean>(
+    field?.options.allowMultiple !== false
+  );
 
   const isSelect = type === "singleSelect" || type === "multiSelect";
   const isFormula = type === "formula";
+  const isLink = type === "link";
+  const isExistingLink = field?.type === "link"; // target can't be changed after creation
   const formulaError = isFormula && expression.trim() ? validateFormula(expression) : null;
   const otherFields = fields.filter((f) => f.id !== field?.id);
 
   function save() {
     if (!name.trim()) return;
     if (isFormula && formulaError) return;
+    if (isLink && !isExistingLink && !linkedTableId) return;
     const options: Record<string, unknown> = { ...(field?.options ?? {}) };
     if (isSelect) options.choices = choices;
     if (isFormula) options.expression = expression;
+    if (isLink && !isExistingLink) { options.linkedTableId = linkedTableId; options.allowMultiple = allowMultiple; }
     onSave({ name: name.trim(), type, options });
     onClose();
   }
@@ -152,6 +162,36 @@ export function FieldEditor({
         <div>
           <label className="mb-1 block text-xs font-medium text-muted">Options</label>
           <ChoiceEditor choices={choices} onChange={setChoices} />
+        </div>
+      )}
+      {isLink && (
+        <div className="space-y-2">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Linked table</label>
+            {isExistingLink ? (
+              <div className="rounded-lg border border-border-token bg-surface px-2 py-1.5 text-sm text-muted">
+                {tables.find((t) => t.id === linkedTableId)?.name ?? "—"} (can't change after creation)
+              </div>
+            ) : (
+              <select
+                value={linkedTableId}
+                onChange={(e) => setLinkedTableId(e.target.value)}
+                className="w-full rounded-lg border border-border-token px-2 py-1.5 text-sm outline-none focus:border-accent"
+              >
+                {tables.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}{t.id === table?.id ? " (this table)" : ""}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+          {!isExistingLink && (
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={allowMultiple} onChange={(e) => setAllowMultiple(e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />
+              Allow linking to multiple records
+            </label>
+          )}
         </div>
       )}
       {isFormula && (

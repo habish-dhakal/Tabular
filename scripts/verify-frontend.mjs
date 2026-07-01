@@ -74,6 +74,15 @@ async function main() {
   const rec1 = await api(j, "POST", `/api/tables/${tableId}/records`, { cells: { [nameF.id]: "alpha", [statusF.id]: "todo", [dateF.id]: "2026-03-20" } });
   await api(j, "POST", `/api/tables/${tableId}/records`, { cells: { [nameF.id]: "bravo", [statusF.id]: "done" } });
 
+  // linked records: a second table + a link field, with one link pre-set
+  const t2 = await api(j, "POST", `/api/bases/${base.id}/tables`, { name: "Refs" });
+  const t2Id = t2.table.id;
+  const t2Primary = (await api(j, "GET", `/api/tables/${t2Id}`)).fields.find((f) => f.isPrimary);
+  const refOne = await api(j, "POST", `/api/tables/${t2Id}/records`, { cells: { [t2Primary.id]: "Ref One" } });
+  await api(j, "POST", `/api/tables/${t2Id}/records`, { cells: { [t2Primary.id]: "Ref Two" } });
+  const linkField = await api(j, "POST", `/api/tables/${tableId}/fields`, { name: "Related", type: "link", options: { linkedTableId: t2Id, allowMultiple: true } });
+  await api(j, "PUT", `/api/records/${rec1.id}/links`, { fieldId: linkField.id, targetIds: [refOne.id] });
+
   /* ---- browser ---- */
   const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-sandbox"] });
   const errors = [];
@@ -148,6 +157,33 @@ async function main() {
       [...document.body.children].some((c) => c.className?.includes?.("fixed") && /computed/i.test(c.textContent))
     );
     check("computed cell opens read-only viewer", viewer);
+    await page.keyboard.press("Escape"); await sleep(200);
+
+    // linked records: chip display + picker add
+    body = await page.evaluate(() => document.body.innerText);
+    check("link chip 'Ref One' shown in grid", body.includes("Ref One"));
+    await page.evaluate(() => {
+      const c = [...document.querySelectorAll("div.cursor-text")].find((d) => d.textContent.trim() === "Ref One");
+      c && c.click();
+    });
+    await sleep(500);
+    const pickerOpen = await page.evaluate(() =>
+      [...document.body.children].some((c) => c.className?.includes?.("fixed") && c.querySelector('input[placeholder="Search records…"]'))
+    );
+    check("link picker opens", pickerOpen);
+    // add "Ref Two" (wait for async options to load first)
+    await page.waitForFunction(
+      () => [...document.querySelectorAll("button")].some((b) => b.textContent.trim() === "Ref Two"),
+      { timeout: 5000 }
+    ).catch(() => {});
+    await page.evaluate(() => {
+      const btns = [...document.querySelectorAll("button")].filter((b) => b.textContent.trim() === "Ref Two");
+      btns[btns.length - 1]?.click();
+    });
+    await sleep(800);
+    const linkNow = await api(j, "GET", `/api/tables/${tableId}/records`);
+    const rec1Links = linkNow.records.find((r) => r.id === rec1.id)?.cells[linkField.id] ?? [];
+    check("link add persisted (2 links, server)", rec1Links.length === 2, JSON.stringify(rec1Links.map((c) => c.label)));
     await page.keyboard.press("Escape"); await sleep(200);
 
     // toolbar popovers

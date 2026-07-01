@@ -165,6 +165,51 @@ async function main() {
   check("cannot delete the last view",
     (await s.req("DELETE", `/api/views/${gridView.id}`)).status === 400);
 
+  /* ---- linked records ---- */
+  const t2 = await s.req("POST", `/api/bases/${baseId}/tables`, { name: "T2" });
+  const t2Id = t2.json.table.id;
+  const t2Primary = (await s.req("GET", `/api/tables/${t2Id}`)).json.fields.find((f) => f.isPrimary);
+  // owner link field on T → T2 (multiple)
+  const linkRes = await s.req("POST", `/api/tables/${tableId}/fields`, { name: "Links", type: "link", options: { linkedTableId: t2Id, allowMultiple: true } });
+  check("create link field", linkRes.status === 200 && linkRes.json.type === "link", linkRes.json?.error);
+  const linkFieldId = linkRes.json.id;
+  const relId = linkRes.json.options.relationshipId;
+  check("owner has relationshipId + symmetricFieldId", !!relId && !!linkRes.json.options.symmetricFieldId);
+  // reverse field auto-created on T2
+  const t2fields = (await s.req("GET", `/api/tables/${t2Id}`)).json.fields;
+  const reverseField = t2fields.find((f) => f.type === "link" && f.options.reverse === true);
+  check("symmetric reverse field created on T2", !!reverseField && reverseField.options.linkedTableId === tableId);
+
+  // two records in T2 + one in T
+  const r2a = await s.req("POST", `/api/tables/${t2Id}/records`, { cells: { [t2Primary.id]: "Alpha" } });
+  const r2b = await s.req("POST", `/api/tables/${t2Id}/records`, { cells: { [t2Primary.id]: "Beta" } });
+  const r1 = await s.req("POST", `/api/tables/${tableId}/records`, { cells: {} });
+
+  // set links r1 → [r2a, r2b]
+  const setRes = await s.req("PUT", `/api/records/${r1.json.id}/links`, { fieldId: linkFieldId, targetIds: [r2a.json.id, r2b.json.id] });
+  check("set links", setRes.status === 200);
+  const tRecs = (await s.req("GET", `/api/tables/${tableId}/records`)).json.records;
+  const r1Now = tRecs.find((r) => r.id === r1.json.id);
+  const chips = r1Now?.cells[linkFieldId] ?? [];
+  check("owner cell resolves 2 link chips", chips.length === 2, JSON.stringify(chips));
+  check("chip labels resolved", chips.some((c) => c.label === "Alpha") && chips.some((c) => c.label === "Beta"));
+
+  // symmetric: r2a should show r1 on its reverse field
+  const t2Recs = (await s.req("GET", `/api/tables/${t2Id}/records`)).json.records;
+  const r2aNow = t2Recs.find((r) => r.id === r2a.json.id);
+  check("symmetric reverse resolves back to r1", (r2aNow?.cells[reverseField.id] ?? []).some((c) => c.id === r1.json.id));
+
+  // single-link field caps at 1
+  const singleLink = await s.req("POST", `/api/tables/${tableId}/fields`, { name: "OneLink", type: "link", options: { linkedTableId: t2Id, allowMultiple: false } });
+  await s.req("PUT", `/api/records/${r1.json.id}/links`, { fieldId: singleLink.json.id, targetIds: [r2a.json.id, r2b.json.id] });
+  const capped = (await s.req("GET", `/api/tables/${tableId}/records`)).json.records.find((r) => r.id === r1.json.id);
+  check("single-link caps at 1 target", (capped?.cells[singleLink.json.id] ?? []).length === 1);
+
+  // deleting the link field removes its reverse partner
+  check("delete link field", (await s.req("DELETE", `/api/fields/${linkFieldId}`)).status === 200);
+  const t2fieldsAfter = (await s.req("GET", `/api/tables/${t2Id}`)).json.fields;
+  check("reverse field removed with owner", !t2fieldsAfter.some((f) => f.id === reverseField.id));
+
   /* ---- record delete ---- */
   check("delete record", (await s.req("DELETE", `/api/records/${recId}`)).status === 200);
 

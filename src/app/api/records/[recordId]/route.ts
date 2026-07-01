@@ -5,6 +5,7 @@ import { records } from "@/server/db/schema";
 import { handle, requireUserId } from "@/server/api-helpers";
 import { AccessError, assertTableAccess } from "@/server/services/access";
 import { deleteRecord, updateRecordCells } from "@/server/services/records";
+import { enrichRecordsWithLinks } from "@/server/services/links";
 
 type Params = { params: Promise<{ recordId: string }> };
 
@@ -27,7 +28,10 @@ export async function PATCH(req: Request, { params }: Params) {
     const tableId = await tableIdForRecord(recordId);
     await assertTableAccess(userId, tableId, true);
     const { cells } = patchBody.parse(await req.json());
-    return updateRecordCells(recordId, userId, cells);
+    const updated = await updateRecordCells(recordId, userId, cells);
+    // Re-attach resolved link chips so the client doesn't lose them on edit.
+    await enrichRecordsWithLinks(tableId, [updated as { id: string; cells: Record<string, unknown> }]);
+    return updated;
   });
 }
 
