@@ -40,7 +40,7 @@ export function Popover({
       {open && (
         <div
           className={cn(
-            "absolute z-40 mt-1 rounded-lg border border-border-token bg-background p-2 shadow-lg",
+            "thin-scroll absolute z-40 mt-1 max-h-[75vh] overflow-y-auto rounded-lg border border-border-token bg-background p-2 shadow-lg",
             align === "right" ? "right-0" : "left-0",
             className
           )}

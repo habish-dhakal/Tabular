@@ -19,7 +19,7 @@ function ChoiceEditor({
 }) {
   const [draft, setDraft] = useState("");
   return (
-    <div className="space-y-1">
+    <div className="thin-scroll max-h-56 space-y-1 overflow-y-auto pr-1">
       {choices.map((c, i) => (
         <div key={c.id} className="flex items-center gap-1.5">
           <GripVertical size={13} className="text-muted" />
