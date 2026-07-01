@@ -199,6 +199,23 @@ async function main() {
   const r2aNow = t2Recs.find((r) => r.id === r2a.json.id);
   check("symmetric reverse resolves back to r1", (r2aNow?.cells[reverseField.id] ?? []).some((c) => c.id === r1.json.id));
 
+  /* ---- lookup + rollup over the link ---- */
+  const scoreF = await s.req("POST", `/api/tables/${t2Id}/fields`, { name: "Score", type: "number" });
+  await s.req("PATCH", `/api/records/${r2a.json.id}`, { cells: { [scoreF.json.id]: 10 } });
+  await s.req("PATCH", `/api/records/${r2b.json.id}`, { cells: { [scoreF.json.id]: 5 } });
+
+  const lookupF = await s.req("POST", `/api/tables/${tableId}/fields`, { name: "Names", type: "lookup", options: { linkFieldId, targetFieldId: t2Primary.id } });
+  const sumF = await s.req("POST", `/api/tables/${tableId}/fields`, { name: "TotalScore", type: "rollup", options: { linkFieldId, targetFieldId: scoreF.json.id, fn: "SUM" } });
+  const countF = await s.req("POST", `/api/tables/${tableId}/fields`, { name: "N", type: "rollup", options: { linkFieldId, targetFieldId: scoreF.json.id, fn: "COUNT" } });
+  check("create lookup field", lookupF.status === 200, lookupF.json?.error);
+  check("create rollup field", sumF.status === 200, sumF.json?.error);
+
+  const enriched = (await s.req("GET", `/api/tables/${tableId}/records`)).json.records.find((r) => r.id === r1.json.id);
+  const lookupVals = enriched?.cells[lookupF.json.id] ?? [];
+  check("lookup pulls linked names", lookupVals.includes("Alpha") && lookupVals.includes("Beta"), JSON.stringify(lookupVals));
+  check("rollup SUM = 15", enriched?.cells[sumF.json.id] === 15, JSON.stringify(enriched?.cells[sumF.json.id]));
+  check("rollup COUNT = 2", enriched?.cells[countF.json.id] === 2, JSON.stringify(enriched?.cells[countF.json.id]));
+
   // single-link field caps at 1
   const singleLink = await s.req("POST", `/api/tables/${tableId}/fields`, { name: "OneLink", type: "link", options: { linkedTableId: t2Id, allowMultiple: false } });
   await s.req("PUT", `/api/records/${r1.json.id}/links`, { fieldId: singleLink.json.id, targetIds: [r2a.json.id, r2b.json.id] });

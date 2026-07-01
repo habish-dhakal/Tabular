@@ -54,9 +54,10 @@ export function computeCellValue(
       return record.createdBy ?? null;
     case "updatedBy":
       return record.updatedBy ?? null;
-    // lookup / rollup / autoNumber: resolved in a later phase
+    // lookup / rollup are resolved server-side into cells during enrichment
     case "lookup":
     case "rollup":
+      return record.cells[field.id];
     case "autoNumber":
       return null;
     default:

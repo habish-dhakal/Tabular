@@ -81,6 +81,8 @@ async function main() {
   const refOne = await api(j, "POST", `/api/tables/${t2Id}/records`, { cells: { [t2Primary.id]: "Ref One" } });
   await api(j, "POST", `/api/tables/${t2Id}/records`, { cells: { [t2Primary.id]: "Ref Two" } });
   const linkField = await api(j, "POST", `/api/tables/${tableId}/fields`, { name: "Related", type: "link", options: { linkedTableId: t2Id, allowMultiple: true } });
+  const lookupField = await api(j, "POST", `/api/tables/${tableId}/fields`, { name: "RefNames", type: "lookup", options: { linkFieldId: linkField.id, targetFieldId: t2Primary.id } });
+  const rollupField = await api(j, "POST", `/api/tables/${tableId}/fields`, { name: "RefCount", type: "rollup", options: { linkFieldId: linkField.id, targetFieldId: t2Primary.id, fn: "COUNT" } });
   await api(j, "PUT", `/api/records/${rec1.id}/links`, { fieldId: linkField.id, targetIds: [refOne.id] });
 
   /* ---- browser ---- */
@@ -182,9 +184,16 @@ async function main() {
     });
     await sleep(800);
     const linkNow = await api(j, "GET", `/api/tables/${tableId}/records`);
-    const rec1Links = linkNow.records.find((r) => r.id === rec1.id)?.cells[linkField.id] ?? [];
+    const rec1Row = linkNow.records.find((r) => r.id === rec1.id);
+    const rec1Links = rec1Row?.cells[linkField.id] ?? [];
     check("link add persisted (2 links, server)", rec1Links.length === 2, JSON.stringify(rec1Links.map((c) => c.label)));
+    // lookup + rollup recomputed from the new links
+    check("lookup pulls 2 linked names", (rec1Row?.cells[lookupField.id] ?? []).length === 2, JSON.stringify(rec1Row?.cells[lookupField.id]));
+    check("rollup COUNT = 2 after link add", rec1Row?.cells[rollupField.id] === 2, JSON.stringify(rec1Row?.cells[rollupField.id]));
     await page.keyboard.press("Escape"); await sleep(200);
+    // UI reflects the recomputed rollup (grid re-fetched after link change)
+    body = await page.evaluate(() => document.body.innerText);
+    check("grid shows both linked names", body.includes("Ref One") && body.includes("Ref Two"));
 
     // toolbar popovers
     for (const label of ["Filter", "Sort", "Group"]) {

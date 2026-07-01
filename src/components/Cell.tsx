@@ -126,6 +126,23 @@ export function CellDisplay({ field, value, expanded }: { field: FieldDTO; value
       );
     }
 
+    case "lookup": {
+      const vals = Array.isArray(value) ? value : [value];
+      if (vals.length === 0) return <span className="text-transparent">·</span>;
+      return (
+        <span className={expanded ? "flex flex-wrap gap-1" : "flex gap-1 overflow-hidden"}>
+          {vals.map((v, i) => (
+            <span key={i} className="inline-block max-w-full truncate rounded bg-surface px-1.5 py-0.5 text-xs">
+              {String(v)}
+            </span>
+          ))}
+        </span>
+      );
+    }
+
+    case "rollup":
+      return <span className={textCls}>{typeof value === "boolean" ? String(value) : String(value)}</span>;
+
     case "formula": {
       if (typeof value === "boolean") return <span>{value ? "true" : "false"}</span>;
       const s = String(value);

@@ -157,7 +157,11 @@ export function TableProvider({ tableId, children }: { tableId: string; children
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ fieldId, targetIds: chips.map((c) => c.id) }),
     });
-  }, []);
+    // Re-fetch so dependent lookup/rollup fields (computed server-side from the
+    // link edges) reflect the change.
+    const recs = await fetch(`/api/tables/${tableId}/records`).then((r) => r.json());
+    setRecords(recs.records ?? []);
+  }, [tableId]);
 
   /* ---- field mutations ---- */
   const addField = useCallback(

@@ -128,21 +128,59 @@ export async function deleteLinkPair(field: FieldDTO) {
   });
 }
 
+/** Human value of a stored cell, used by lookup/rollup over linked records. */
+function formatValue(field: FieldDTO | undefined, raw: unknown): string | number | boolean | null {
+  if (!field || raw === undefined || raw === null || raw === "") return null;
+  switch (field.type) {
+    case "singleSelect": {
+      const c = (field.options.choices as { id: string; name: string }[])?.find((x) => x.id === raw);
+      return c ? c.name : String(raw);
+    }
+    case "multiSelect": {
+      const cs = (field.options.choices as { id: string; name: string }[]) ?? [];
+      return (raw as string[]).map((id) => cs.find((c) => c.id === id)?.name ?? id).join(", ");
+    }
+    case "checkbox": return Boolean(raw);
+    case "number": case "currency": case "percent": case "rating": return Number(raw);
+    default: return typeof raw === "number" || typeof raw === "boolean" ? raw : String(raw);
+  }
+}
+
+const ROLLUP_FNS = ["COUNT", "SUM", "AVERAGE", "MIN", "MAX", "CONCAT"] as const;
+export type RollupFn = (typeof ROLLUP_FNS)[number];
+
+function aggregate(fn: string, values: (string | number | boolean | null)[], linkedCount: number) {
+  const nums = values.map((v) => Number(v)).filter((n) => !Number.isNaN(n));
+  switch (fn) {
+    case "COUNT": return linkedCount;
+    case "SUM": return nums.reduce((a, b) => a + b, 0);
+    case "AVERAGE": return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+    case "MIN": return nums.length ? Math.min(...nums) : null;
+    case "MAX": return nums.length ? Math.max(...nums) : null;
+    case "CONCAT": return values.filter((v) => v !== null && v !== "").map(String).join(", ");
+    default: return null;
+  }
+}
+
 /**
- * Attach resolved link values to each record's `cells[linkFieldId]` as
- * LinkChip[]. Not persisted — computed for display, like formula fields.
+ * Attach computed values to each record's cells for display (not persisted):
+ *  - link:   cells[fieldId] = LinkChip[]
+ *  - lookup: cells[fieldId] = value[]  (pulled from linked records)
+ *  - rollup: cells[fieldId] = aggregate over linked records
  */
-export async function enrichRecordsWithLinks(
+export async function enrichRecords(
   tableId: string,
   recs: { id: string; cells: Record<string, unknown> }[]
 ) {
   if (recs.length === 0) return recs;
-  const linkFields = (await db.query.fields.findMany({
-    where: and(eq(fields.tableId, tableId), eq(fields.type, "link")),
-  })) as unknown as FieldDTO[];
-  if (linkFields.length === 0) return recs;
+  const allFields = (await db.query.fields.findMany({ where: eq(fields.tableId, tableId) })) as unknown as FieldDTO[];
+  const linkFields = allFields.filter((f) => f.type === "link");
+  const refFields = allFields.filter((f) => f.type === "lookup" || f.type === "rollup");
+  if (linkFields.length === 0 && refFields.length === 0) return recs;
 
   const recIds = recs.map((r) => r.id);
+  // per link field: recordId → linked record ids
+  const linkedIdsByField = new Map<string, Map<string, string[]>>();
 
   for (const lf of linkFields) {
     const rel = relationshipId(lf);
@@ -156,7 +194,6 @@ export async function enrichRecordsWithLinks(
       ),
     });
 
-    // record id → linked record ids
     const byRecord = new Map<string, string[]>();
     const linkedIds = new Set<string>();
     for (const e of edges) {
@@ -166,22 +203,54 @@ export async function enrichRecordsWithLinks(
       byRecord.get(self)!.push(other);
       linkedIds.add(other);
     }
+    linkedIdsByField.set(lf.id, byRecord);
 
-    // labels from the other table's primary field
     const otherPrimary = await primaryFieldId(otherTableId);
     const labelMap = new Map<string, string>();
     if (linkedIds.size) {
       const linked = await db.query.records.findMany({ where: inArray(records.id, [...linkedIds]) });
       for (const lr of linked) labelMap.set(lr.id, labelOf(lr.cells as Record<string, unknown>, otherPrimary));
     }
-
     for (const r of recs) {
       const ids = byRecord.get(r.id) ?? [];
-      (r.cells as Record<string, unknown>)[lf.id] = ids.map((id): LinkChip => ({ id, label: labelMap.get(id) ?? "Unnamed record" }));
+      r.cells[lf.id] = ids.map((id): LinkChip => ({ id, label: labelMap.get(id) ?? "Unnamed record" }));
     }
   }
+
+  // lookup / rollup over the resolved edges
+  for (const cf of refFields) {
+    const linkFieldId = cf.options.linkFieldId as string | undefined;
+    const targetFieldId = cf.options.targetFieldId as string | undefined;
+    const lf = linkFields.find((f) => f.id === linkFieldId);
+    if (!lf || !targetFieldId) { for (const r of recs) r.cells[cf.id] = cf.type === "lookup" ? [] : null; continue; }
+
+    const byRecord = linkedIdsByField.get(lf.id) ?? new Map();
+    const targetTableId = lf.options.linkedTableId as string;
+    const targetField = (await db.query.fields.findFirst({ where: eq(fields.id, targetFieldId) })) as unknown as FieldDTO | undefined;
+
+    const allIds = [...new Set([...byRecord.values()].flat())];
+    const valueById = new Map<string, string | number | boolean | null>();
+    if (allIds.length) {
+      const linked = await db.query.records.findMany({ where: inArray(records.id, allIds) });
+      for (const lr of linked) valueById.set(lr.id, formatValue(targetField, (lr.cells as Record<string, unknown>)[targetFieldId]));
+    }
+
+    for (const r of recs) {
+      const ids: string[] = byRecord.get(r.id) ?? [];
+      const values = ids.map((id) => valueById.get(id) ?? null);
+      if (cf.type === "lookup") {
+        r.cells[cf.id] = values.filter((v) => v !== null && v !== "");
+      } else {
+        r.cells[cf.id] = aggregate((cf.options.fn as string) ?? "COUNT", values, ids.length);
+      }
+    }
+  }
+
   return recs;
 }
+
+/** @deprecated use enrichRecords */
+export const enrichRecordsWithLinks = enrichRecords;
 
 /** Options for the link picker: candidate records in the linked table. */
 export async function linkOptions(tableId: string, limit = 200): Promise<LinkChip[]> {

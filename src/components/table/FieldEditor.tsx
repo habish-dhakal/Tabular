@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { nanoid } from "nanoid";
 import { Trash2, Plus, GripVertical } from "lucide-react";
 import type { FieldDTO } from "@/lib/types";
@@ -12,7 +12,8 @@ import { useTable } from "@/components/table/TableProvider";
 
 // Types without a proper editor yet — hidden from the picker until built,
 // so users can't create a field that falls back to a broken text input.
-const NON_CREATABLE: FieldType[] = ["lookup", "rollup", "attachment", "user"];
+const NON_CREATABLE: FieldType[] = ["attachment", "user"];
+const ROLLUP_FNS = ["COUNT", "SUM", "AVERAGE", "MIN", "MAX", "CONCAT"];
 
 function ChoiceEditor({
   choices,
@@ -108,11 +109,29 @@ export function FieldEditor({
   const [allowMultiple, setAllowMultiple] = useState<boolean>(
     field?.options.allowMultiple !== false
   );
+  const [linkFieldId, setLinkFieldId] = useState<string>((field?.options.linkFieldId as string) ?? "");
+  const [targetFieldId, setTargetFieldId] = useState<string>((field?.options.targetFieldId as string) ?? "");
+  const [rollupFn, setRollupFn] = useState<string>((field?.options.fn as string) ?? "COUNT");
+  const [targetFields, setTargetFields] = useState<FieldDTO[]>([]);
 
   const isSelect = type === "singleSelect" || type === "multiSelect";
   const isFormula = type === "formula";
   const isLink = type === "link";
   const isExistingLink = field?.type === "link"; // target can't be changed after creation
+  const isRef = type === "lookup" || type === "rollup"; // lookup / rollup
+  const linkFields = fields.filter((f) => f.type === "link");
+
+  // When a lookup/rollup's source link field changes, load the linked table's fields.
+  const effectiveLinkFieldId = linkFieldId || linkFields[0]?.id || "";
+  useEffect(() => {
+    if (!isRef || !effectiveLinkFieldId) { setTargetFields([]); return; }
+    const lf = linkFields.find((f) => f.id === effectiveLinkFieldId);
+    const linkedTableId = lf?.options.linkedTableId as string | undefined;
+    if (!linkedTableId) return;
+    let alive = true;
+    fetch(`/api/tables/${linkedTableId}`).then((r) => r.json()).then((d) => alive && setTargetFields(d.fields ?? []));
+    return () => { alive = false; };
+  }, [isRef, effectiveLinkFieldId]); // eslint-disable-line react-hooks/exhaustive-deps
   const formulaError = isFormula && expression.trim() ? validateFormula(expression) : null;
   const otherFields = fields.filter((f) => f.id !== field?.id);
 
@@ -124,6 +143,12 @@ export function FieldEditor({
     if (isSelect) options.choices = choices;
     if (isFormula) options.expression = expression;
     if (isLink && !isExistingLink) { options.linkedTableId = linkedTableId; options.allowMultiple = allowMultiple; }
+    if (isRef) {
+      if (!effectiveLinkFieldId || !targetFieldId) return;
+      options.linkFieldId = effectiveLinkFieldId;
+      options.targetFieldId = targetFieldId;
+      if (type === "rollup") options.fn = rollupFn;
+    }
     onSave({ name: name.trim(), type, options });
     onClose();
   }
@@ -193,6 +218,51 @@ export function FieldEditor({
             </label>
           )}
         </div>
+      )}
+      {isRef && (
+        linkFields.length === 0 ? (
+          <p className="rounded-lg bg-surface px-2 py-2 text-xs text-muted">
+            Create a “Link to record” field first — {type === "lookup" ? "lookups" : "rollups"} pull from linked records.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted">Through link field</label>
+              <select
+                value={effectiveLinkFieldId}
+                onChange={(e) => { setLinkFieldId(e.target.value); setTargetFieldId(""); }}
+                className="w-full rounded-lg border border-border-token px-2 py-1.5 text-sm outline-none focus:border-accent"
+              >
+                {linkFields.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted">
+                {type === "lookup" ? "Field to look up" : "Field to roll up"}
+              </label>
+              <select
+                value={targetFieldId}
+                onChange={(e) => setTargetFieldId(e.target.value)}
+                className="w-full rounded-lg border border-border-token px-2 py-1.5 text-sm outline-none focus:border-accent"
+              >
+                <option value="">Select a field…</option>
+                {targetFields.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+              </select>
+            </div>
+            {type === "rollup" && (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted">Aggregate</label>
+                <select
+                  value={rollupFn}
+                  onChange={(e) => setRollupFn(e.target.value)}
+                  className="w-full rounded-lg border border-border-token px-2 py-1.5 text-sm outline-none focus:border-accent"
+                >
+                  {ROLLUP_FNS.map((fn) => <option key={fn} value={fn}>{fn}</option>)}
+                </select>
+              </div>
+            )}
+          </div>
+        )
       )}
       {isFormula && (
         <div>
