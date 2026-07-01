@@ -10,7 +10,7 @@ import type { RecordDTO } from "@/lib/types";
 
 export function RecordModal({ record, onClose }: { record: RecordDTO; onClose: () => void }) {
   const { fields, commitCell, records } = useTable();
-  const [editingField, setEditingField] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ fieldId: string; rect: DOMRect } | null>(null);
 
   // Always read the freshest copy from context.
   const live = records.find((r) => r.id === record.id) ?? record;
@@ -29,7 +29,7 @@ export function RecordModal({ record, onClose }: { record: RecordDTO; onClose: (
           {fields.map((f) => {
             const value = computeCellValue(f, live, fields);
             const computed = isComputed(f.type);
-            const editing = editingField === f.id;
+            const isEditing = editing?.fieldId === f.id;
             return (
               <div key={f.id} className="grid grid-cols-[130px_1fr] items-start gap-3">
                 <div className="pt-1 text-xs font-medium text-muted" title={FIELD_TYPE_META[f.type].label}>
@@ -37,11 +37,18 @@ export function RecordModal({ record, onClose }: { record: RecordDTO; onClose: (
                 </div>
                 {f.type === "checkbox" ? (
                   <input type="checkbox" checked={!!value} onChange={(e) => commitCell(live.id, f.id, e.target.checked)} className="mt-1 h-4 w-4 accent-[var(--accent)]" />
-                ) : editing ? (
-                  <CellEditor field={f} value={live.cells[f.id]} onCommit={(v) => { commitCell(live.id, f.id, v); setEditingField(null); }} onCancel={() => setEditingField(null)} />
+                ) : isEditing ? (
+                  <CellEditor
+                    field={f}
+                    value={live.cells[f.id]}
+                    anchorRect={editing?.rect}
+                    onChange={(v) => commitCell(live.id, f.id, v)}
+                    onCommit={(v) => { commitCell(live.id, f.id, v); setEditing(null); }}
+                    onCancel={() => setEditing(null)}
+                  />
                 ) : (
                   <div
-                    onClick={() => !computed && setEditingField(f.id)}
+                    onClick={(e) => !computed && setEditing({ fieldId: f.id, rect: e.currentTarget.getBoundingClientRect() })}
                     className={"min-h-[28px] rounded border border-transparent px-1.5 py-1 text-sm " + (computed ? "text-muted" : "cursor-text hover:border-border-token")}
                   >
                     <CellDisplay field={f} value={value} />

@@ -125,7 +125,7 @@ export function GridView() {
                       style={{ width: colWidth(f) }}
                     >
                       {isEditing ? (
-                        <CellEditor field={f} value={record.cells[f.id]} anchorRect={editing?.rect} onCommit={(v) => { commitCell(record.id, f.id, v); setEditing(null); }} onCancel={() => setEditing(null)} />
+                        <CellEditor field={f} value={record.cells[f.id]} anchorRect={editing?.rect} onChange={(v) => commitCell(record.id, f.id, v)} onCommit={(v) => { commitCell(record.id, f.id, v); setEditing(null); }} onCancel={() => setEditing(null)} />
                       ) : (
                         <CellDisplay field={f} value={value} />
                       )}

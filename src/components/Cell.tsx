@@ -6,6 +6,9 @@ import { Check, Star } from "lucide-react";
 import type { FieldDTO } from "@/lib/types";
 import type { SelectChoice } from "@/lib/fields";
 import { isComputed } from "@/lib/fields";
+import { CellPopover } from "@/components/cell-editors/CellPopover";
+import { DatePicker } from "@/components/cell-editors/DatePicker";
+import { SelectMenu } from "@/components/cell-editors/SelectMenu";
 
 function choicesOf(field: FieldDTO): SelectChoice[] {
   return (field.options.choices as SelectChoice[]) ?? [];
@@ -22,13 +25,6 @@ function fmtDate(v: unknown): string {
 function fmtDateTime(v: unknown): string {
   const d = new Date(String(v));
   return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString();
-}
-/** ISO instant -> value string for <input type="datetime-local"> in LOCAL time. */
-function isoToLocalInput(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 function SelectBadge({ choice }: { choice: SelectChoice }) {
@@ -176,29 +172,40 @@ function LongTextFloating({
   );
 }
 
-/** Editable cell editor. Calls onCommit(newValue) or onCancel(). */
+/**
+ * Editable cell editor.
+ *  - onCommit(v): save AND exit edit mode (used for single-shot edits)
+ *  - onChange(v): save WITHOUT closing (rich pickers persist as you edit)
+ *  - onCancel():  exit edit mode
+ *  - anchorRect:  cell bounds, so popovers float unclipped over the grid
+ */
 export function CellEditor({
   field,
   value,
   onCommit,
   onCancel,
+  onChange,
   anchorRect,
 }: {
   field: FieldDTO;
   value: unknown;
   onCommit: (v: unknown) => void;
   onCancel: () => void;
+  onChange?: (v: unknown) => void;
   anchorRect?: DOMRect | null;
 }) {
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   const [draft, setDraft] = useState<string>(
     value === undefined || value === null ? "" : String(value)
   );
+  const save = onChange ?? onCommit;
 
+  const inlineTypes = new Set(["singleLineText", "url", "email", "phone", "number", "currency", "percent"]);
   useEffect(() => {
-    if (field.type === "longText") return;
+    if (!inlineTypes.has(field.type)) return;
     inputRef.current?.focus();
     if (inputRef.current instanceof HTMLInputElement) inputRef.current.select();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [field.type]);
 
   const commitText = () => onCommit(draft === "" ? null : draft);
@@ -215,7 +222,6 @@ export function CellEditor({
           />
         );
       }
-      // Inline (e.g. record modal) — plenty of room.
       return (
         <textarea
           ref={inputRef as React.RefObject<HTMLTextAreaElement>}
@@ -232,26 +238,28 @@ export function CellEditor({
       );
     }
 
-    case "singleSelect": {
+    case "singleSelect":
+    case "multiSelect": {
       const cs = choicesOf(field);
-      return (
-        <select
-          autoFocus
-          value={(value as string) ?? ""}
-          onChange={(e) => onCommit(e.target.value || null)}
-          onBlur={onCancel}
-          className="w-full rounded border border-accent bg-background p-1 text-sm outline-none"
-        >
-          <option value="">—</option>
-          {cs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+      const menu = (
+        <SelectMenu
+          choices={cs}
+          value={value}
+          multi={field.type === "multiSelect"}
+          onCommit={(v) => save(v)}
+          onClose={onCancel}
+        />
+      );
+      return anchorRect ? (
+        <CellPopover anchorRect={anchorRect} onClose={onCancel} minWidth={240}>{menu}</CellPopover>
+      ) : (
+        <div className="rounded-lg border border-border-token">{menu}</div>
       );
     }
 
     case "number":
     case "currency":
     case "percent":
-    case "rating":
       return (
         <input
           ref={inputRef as React.RefObject<HTMLInputElement>}
@@ -267,39 +275,38 @@ export function CellEditor({
         />
       );
 
-    case "date": {
-      const dateVal = draft ? String(draft).slice(0, 10) : "";
+    case "rating": {
+      const max = (field.options.max as number) ?? 5;
+      const cur = Number(value) || 0;
       return (
-        <input
-          ref={inputRef as React.RefObject<HTMLInputElement>}
-          type="date"
-          value={dateVal}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => onCommit(draft || null)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") onCancel();
-            if (e.key === "Enter") onCommit(draft || null);
-          }}
-          className="w-full rounded border border-accent bg-background p-1 text-sm outline-none"
-        />
+        <div className="flex items-center gap-0.5">
+          {Array.from({ length: max }).map((_, i) => (
+            <button
+              key={i}
+              onClick={() => onCommit(i + 1 === cur ? null : i + 1)}
+              className="p-0.5"
+            >
+              <Star size={16} className={i < cur ? "fill-yellow-400 text-yellow-400" : "text-gray-300 hover:text-yellow-300"} />
+            </button>
+          ))}
+        </div>
       );
     }
 
+    case "date":
     case "dateTime": {
-      const localVal = draft ? isoToLocalInput(String(draft)) : "";
-      return (
-        <input
-          ref={inputRef as React.RefObject<HTMLInputElement>}
-          type="datetime-local"
-          value={localVal}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => onCommit(draft || null)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") onCancel();
-            if (e.key === "Enter") onCommit(draft || null);
-          }}
-          className="w-full rounded border border-accent bg-background p-1 text-sm outline-none"
+      const picker = (
+        <DatePicker
+          value={value}
+          withTime={field.type === "dateTime"}
+          onCommit={(v) => save(v)}
+          onClose={onCancel}
         />
+      );
+      return anchorRect ? (
+        <CellPopover anchorRect={anchorRect} onClose={onCancel} minWidth={260}>{picker}</CellPopover>
+      ) : (
+        <div className="rounded-lg border border-border-token">{picker}</div>
       );
     }
 
