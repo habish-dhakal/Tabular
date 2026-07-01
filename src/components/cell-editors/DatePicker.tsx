@@ -7,6 +7,53 @@ const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
 const pad = (n: number) => String(n).padStart(2, "0");
 const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
+/** Custom 12-hour time selector (hour / minute / AM-PM) — no native control.
+ *  Works with a 24h "HH:MM" string. */
+function TimeSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [hStr, mStr] = value.split(":");
+  const h24 = Number(hStr) || 0;
+  const minute = Number(mStr) || 0;
+  const isPM = h24 >= 12;
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+
+  const emit = (nh12: number, nmin: number, pm: boolean) => {
+    let h = nh12 % 12;
+    if (pm) h += 12;
+    onChange(`${pad(h)}:${pad(nmin)}`);
+  };
+  const sel = "rounded border border-border-token bg-background px-1.5 py-1 text-sm outline-none focus:border-accent";
+
+  return (
+    <div className="flex flex-1 items-center gap-1">
+      <select className={sel} value={h12} onChange={(e) => emit(Number(e.target.value), minute, isPM)}>
+        {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
+          <option key={h} value={h}>{h}</option>
+        ))}
+      </select>
+      <span className="text-muted">:</span>
+      <select className={sel} value={minute} onChange={(e) => emit(h12, Number(e.target.value), isPM)}>
+        {Array.from({ length: 60 }, (_, i) => i).map((m) => (
+          <option key={m} value={m}>{pad(m)}</option>
+        ))}
+      </select>
+      <div className="ml-1 flex overflow-hidden rounded border border-border-token">
+        {(["AM", "PM"] as const).map((ap) => {
+          const active = (ap === "PM") === isPM;
+          return (
+            <button
+              key={ap}
+              onClick={() => emit(h12, minute, ap === "PM")}
+              className={"px-2 py-1 text-xs " + (active ? "bg-accent text-white" : "text-muted hover:bg-surface")}
+            >
+              {ap}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function parseValue(v: unknown): Date | null {
   if (v === null || v === undefined || v === "") return null;
   const s = String(v);
@@ -117,19 +164,17 @@ export function DatePicker({
       {withTime && (
         <div className="mt-2 flex items-center gap-2 border-t border-border-token px-1 pt-2">
           <label className="text-xs text-muted">Time</label>
-          <input
-            type="time"
+          <TimeSelect
             value={time}
-            onChange={(e) => {
-              setTime(e.target.value);
-              const [h, m] = e.target.value.split(":").map(Number);
+            onChange={(next) => {
+              setTime(next);
+              const [h, m] = next.split(":").map(Number);
               // If no day is chosen yet, changing the time implies today.
               const base = sel ?? today;
               if (!sel) setSel(base);
               const dt = new Date(base.getFullYear(), base.getMonth(), base.getDate(), h || 0, m || 0);
               onCommit(dt.toISOString());
             }}
-            className="flex-1 rounded border border-border-token px-2 py-1 text-sm outline-none focus:border-accent"
           />
         </div>
       )}
@@ -141,12 +186,22 @@ export function DatePicker({
         >
           Clear
         </button>
-        <button
-          onClick={() => { pickDay(today); if (withTime) { /* stay open */ } }}
-          className="text-accent hover:underline"
-        >
-          Today
-        </button>
+        {withTime ? (
+          <button
+            onClick={() => {
+              const now = new Date();
+              setSel(now);
+              setCursor({ year: now.getFullYear(), month: now.getMonth() });
+              setTime(`${pad(now.getHours())}:${pad(now.getMinutes())}`);
+              onCommit(now.toISOString());
+            }}
+            className="font-medium text-accent hover:underline"
+          >
+            Now
+          </button>
+        ) : (
+          <button onClick={() => pickDay(today)} className="text-accent hover:underline">Today</button>
+        )}
         {withTime && (
           <button onClick={onClose} className="font-medium text-accent hover:underline">Done</button>
         )}
