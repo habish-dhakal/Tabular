@@ -10,7 +10,9 @@ import { FIELD_TYPE_META, SELECT_COLORS, type SelectChoice } from "@/lib/fields"
 import { validateFormula } from "@/lib/formula";
 import { useTable } from "@/components/table/TableProvider";
 
-const NON_CREATABLE: FieldType[] = ["lookup", "rollup"]; // need relations first
+// Types without a proper editor yet — hidden from the picker until built,
+// so users can't create a field that falls back to a broken text input.
+const NON_CREATABLE: FieldType[] = ["link", "lookup", "rollup", "attachment", "user"];
 
 function ChoiceEditor({
   choices,

@@ -51,7 +51,7 @@ export function RecordModal({ record, onClose }: { record: RecordDTO; onClose: (
                     onClick={(e) => !computed && setEditing({ fieldId: f.id, rect: e.currentTarget.getBoundingClientRect() })}
                     className={"min-h-[28px] rounded border border-transparent px-1.5 py-1 text-sm " + (computed ? "text-muted" : "cursor-text hover:border-border-token")}
                   >
-                    <CellDisplay field={f} value={value} />
+                    <CellDisplay field={f} value={value} expanded />
                   </div>
                 )}
               </div>

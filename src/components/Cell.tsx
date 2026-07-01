@@ -38,11 +38,13 @@ function SelectBadge({ choice }: { choice: SelectChoice }) {
   );
 }
 
-/** Read-only rendering of a (possibly computed) cell value. */
-export function CellDisplay({ field, value }: { field: FieldDTO; value: unknown }) {
+/** Read-only rendering of a (possibly computed) cell value.
+ *  `expanded` disables single-line truncation so full text wraps. */
+export function CellDisplay({ field, value, expanded }: { field: FieldDTO; value: unknown; expanded?: boolean }) {
   if (value === undefined || value === null || value === "") {
     return <span className="text-transparent">·</span>;
   }
+  const textCls = expanded ? "whitespace-pre-wrap break-words" : "truncate";
 
   switch (field.type) {
     case "checkbox":
@@ -93,22 +95,33 @@ export function CellDisplay({ field, value }: { field: FieldDTO; value: unknown 
       return <span>{fmtDateTime(value)}</span>;
 
     case "url":
-      return (
-        <a href={String(value)} target="_blank" rel="noreferrer" className="text-accent underline">
+      // In the grid (non-expanded) render as styled text so clicking the cell
+      // edits it; only make it a real navigating link when expanded.
+      return expanded ? (
+        <a href={String(value)} target="_blank" rel="noreferrer" className="break-words text-accent underline">
           {String(value)}
         </a>
+      ) : (
+        <span className="truncate text-accent underline">{String(value)}</span>
+      );
+
+    case "email":
+      return expanded ? (
+        <a href={`mailto:${String(value)}`} className="break-words text-accent underline">{String(value)}</a>
+      ) : (
+        <span className={textCls}>{String(value)}</span>
       );
 
     case "formula": {
       if (typeof value === "boolean") return <span>{value ? "true" : "false"}</span>;
       const s = String(value);
       return (
-        <span className={"truncate " + (s === "#ERROR" || s === "#CYCLE" ? "text-red-600" : "")}>{s}</span>
+        <span className={textCls + (s === "#ERROR" || s === "#CYCLE" ? " text-red-600" : "")}>{s}</span>
       );
     }
 
     default:
-      return <span className="truncate">{String(value)}</span>;
+      return <span className={textCls}>{String(value)}</span>;
   }
 }
 

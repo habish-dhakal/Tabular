@@ -33,7 +33,9 @@ export function DatePicker({
     return { year: base.getFullYear(), month: base.getMonth() };
   });
   const [time, setTime] = useState(
-    initial ? `${pad(initial.getHours())}:${pad(initial.getMinutes())}` : "09:00"
+    initial
+      ? `${pad(initial.getHours())}:${pad(initial.getMinutes())}`
+      : `${pad(today.getHours())}:${pad(today.getMinutes())}`
   );
 
   const days = useMemo(() => {
@@ -114,16 +116,18 @@ export function DatePicker({
 
       {withTime && (
         <div className="mt-2 flex items-center gap-2 border-t border-border-token px-1 pt-2">
+          <label className="text-xs text-muted">Time</label>
           <input
             type="time"
             value={time}
             onChange={(e) => {
               setTime(e.target.value);
-              if (sel) {
-                const [h, m] = e.target.value.split(":").map(Number);
-                const dt = new Date(sel.getFullYear(), sel.getMonth(), sel.getDate(), h || 0, m || 0);
-                onCommit(dt.toISOString());
-              }
+              const [h, m] = e.target.value.split(":").map(Number);
+              // If no day is chosen yet, changing the time implies today.
+              const base = sel ?? today;
+              if (!sel) setSel(base);
+              const dt = new Date(base.getFullYear(), base.getMonth(), base.getDate(), h || 0, m || 0);
+              onCommit(dt.toISOString());
             }}
             className="flex-1 rounded border border-border-token px-2 py-1 text-sm outline-none focus:border-accent"
           />

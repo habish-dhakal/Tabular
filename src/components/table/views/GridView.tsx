@@ -7,6 +7,7 @@ import { useTable } from "@/components/table/TableProvider";
 import { FieldHeaderMenu } from "@/components/table/FieldHeaderMenu";
 import { FieldEditor } from "@/components/table/FieldEditor";
 import { Popover } from "@/components/ui/Popover";
+import { CellPopover } from "@/components/cell-editors/CellPopover";
 import { CellDisplay, CellEditor } from "@/components/Cell";
 import { FIELD_TYPE_META, isComputed, type SelectChoice } from "@/lib/fields";
 import { applyFilterSort, groupRecords } from "@/lib/query";
@@ -30,6 +31,7 @@ export function GridView() {
   } = useTable();
   const parentRef = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState<{ recordId: string; fieldId: string; rect?: DOMRect } | null>(null);
+  const [viewing, setViewing] = useState<{ recordId: string; fieldId: string; rect: DOMRect } | null>(null);
 
   const rowH = ROW_HEIGHTS[config.rowHeight ?? "short"];
   const hidden = new Set(config.hiddenFieldIds ?? []);
@@ -120,8 +122,12 @@ export function GridView() {
                   return (
                     <div
                       key={f.id}
-                      onClick={(e) => !computed && !isEditing && setEditing({ recordId: record.id, fieldId: f.id, rect: e.currentTarget.getBoundingClientRect() })}
-                      className={"flex items-center overflow-hidden border-r border-border-token px-2 text-sm " + (computed ? "bg-surface/40 text-muted" : "cursor-text")}
+                      onClick={(e) =>
+                        computed
+                          ? setViewing({ recordId: record.id, fieldId: f.id, rect: e.currentTarget.getBoundingClientRect() })
+                          : !isEditing && setEditing({ recordId: record.id, fieldId: f.id, rect: e.currentTarget.getBoundingClientRect() })
+                      }
+                      className={"flex items-center overflow-hidden border-r border-border-token px-2 text-sm " + (computed ? "cursor-pointer bg-surface/40 text-muted" : "cursor-text")}
                       style={{ width: colWidth(f) }}
                     >
                       {isEditing ? (
@@ -142,6 +148,26 @@ export function GridView() {
           <Plus size={15} /> Add row
         </button>
       </div>
+
+      {/* Read-only viewer for computed cells (formula/created/updated) */}
+      {viewing && (() => {
+        const rec = records.find((r) => r.id === viewing.recordId);
+        const fld = fields.find((f) => f.id === viewing.fieldId);
+        if (!rec || !fld) return null;
+        return (
+          <CellPopover anchorRect={viewing.rect} onClose={() => setViewing(null)} minWidth={260}>
+            <div className="p-3">
+              <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted">
+                {fld.name}
+                {isComputed(fld.type) && <span className="rounded bg-surface px-1 text-[10px] uppercase">computed</span>}
+              </div>
+              <div className="thin-scroll max-h-64 overflow-auto text-sm">
+                <CellDisplay field={fld} value={computeCellValue(fld, rec, fields)} expanded />
+              </div>
+            </div>
+          </CellPopover>
+        );
+      })()}
     </div>
   );
 }
