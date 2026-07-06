@@ -4,6 +4,9 @@ import { Loader2, Table2, Kanban, CalendarDays, LayoutGrid, Plus, Trash2 } from 
 import { TableProvider, useTable } from "@/components/table/TableProvider";
 import { Toolbar } from "@/components/table/Toolbar";
 import { Popover } from "@/components/ui/Popover";
+import { AutomationsProvider } from "@/components/automations/AutomationsProvider";
+import { AutomationsButton } from "@/components/automations/AutomationsButton";
+import { AutomationsPanel } from "@/components/automations/AutomationsPanel";
 import { GridView } from "@/components/table/views/GridView";
 import { KanbanView } from "@/components/table/views/KanbanView";
 import { CalendarView } from "@/components/table/views/CalendarView";
@@ -74,6 +77,7 @@ function ViewBar() {
           </div>
         )}
       </Popover>
+      <AutomationsButton />
     </div>
   );
 }
@@ -109,6 +113,7 @@ function Inner() {
       <div className="flex-1 overflow-hidden">
         <ActiveView />
       </div>
+      <AutomationsPanel />
     </div>
   );
 }
@@ -116,7 +121,9 @@ function Inner() {
 export function TableWorkspace({ tableId }: { tableId: string }) {
   return (
     <TableProvider tableId={tableId}>
-      <Inner />
+      <AutomationsProvider tableId={tableId}>
+        <Inner />
+      </AutomationsProvider>
     </TableProvider>
   );
 }

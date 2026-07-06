@@ -8,6 +8,13 @@
       "when": 1782882608062,
       "tag": "0000_kind_mattie_franklin",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1782966851382,
+      "tag": "0001_plain_gladiator",
+      "breakpoints": true
     }
   ]
 }

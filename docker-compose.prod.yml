@@ -1,0 +1,93 @@
+# Production stack: web + worker built from the Dockerfile, backed by Postgres
+# and Redis, with a one-shot migration job that runs before the app starts.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Secrets (AUTH_SECRET, SLACK_BOT_TOKEN, SMTP_*, GOOGLE_*) are read from .env via
+# env_file; DATABASE_URL / REDIS_URL / AUTH_URL are overridden here to point at
+# the compose service network.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tabular}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tabular}
+      POSTGRES_DB: ${POSTGRES_DB:-tabular}
+    volumes:
+      - tabular-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tabular} -d ${POSTGRES_DB:-tabular}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - tabular-redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: apply Drizzle migrations, then exit. web/worker wait for success.
+  migrate:
+    build:
+      context: .
+      target: runtime
+    command: ["npm", "run", "db:migrate"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-tabular}:${POSTGRES_PASSWORD:-tabular}@db:5432/${POSTGRES_DB:-tabular}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  web:
+    build:
+      context: .
+      target: web
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://${POSTGRES_USER:-tabular}:${POSTGRES_PASSWORD:-tabular}@db:5432/${POSTGRES_DB:-tabular}
+      REDIS_URL: redis://redis:6379
+      AUTH_URL: ${AUTH_URL:-http://localhost:3100}
+    ports:
+      - "3100:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      target: runtime
+    command: ["npx", "tsx", "src/worker/index.ts"]
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://${POSTGRES_USER:-tabular}:${POSTGRES_PASSWORD:-tabular}@db:5432/${POSTGRES_DB:-tabular}
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  tabular-pgdata:
+  tabular-redisdata:

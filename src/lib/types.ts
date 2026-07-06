@@ -1,4 +1,9 @@
-import type { FieldType, ViewType } from "@/server/db/schema";
+import type {
+  AutomationActionType,
+  AutomationTriggerType,
+  FieldType,
+  ViewType,
+} from "@/server/db/schema";
 
 export interface TableDTO {
   id: string;
@@ -74,4 +79,57 @@ export interface TableBundle {
   table: TableDTO;
   fields: FieldDTO[];
   views: ViewDTO[];
+}
+
+/* -------------------- Automations -------------------- */
+export type TriggerType = AutomationTriggerType;
+export type ActionType = AutomationActionType;
+
+export interface AutomationTrigger {
+  type: TriggerType;
+  config: Record<string, unknown>;
+}
+
+export interface AutomationAction {
+  id: string;
+  type: ActionType;
+  position: number;
+  config: Record<string, unknown>;
+}
+
+export interface AutomationDTO {
+  id: string;
+  tableId: string;
+  name: string;
+  enabled: boolean;
+  triggerType: TriggerType;
+  triggerConfig: Record<string, unknown>;
+  actions: AutomationAction[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type RunStatus = "running" | "success" | "error" | "skipped";
+
+export interface RunStepLog {
+  id: string;
+  actionId: string | null;
+  position: number;
+  type: ActionType;
+  status: "success" | "error" | "skipped";
+  input: Record<string, unknown>;
+  output?: Record<string, unknown> | null;
+  error?: string | null;
+  startedAt: string;
+  finishedAt?: string | null;
+}
+
+export interface AutomationRunDTO {
+  id: string;
+  status: RunStatus;
+  recordId?: string | null;
+  error?: string | null;
+  startedAt: string;
+  finishedAt?: string | null;
+  steps: RunStepLog[];
 }

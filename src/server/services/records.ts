@@ -2,6 +2,13 @@ import { and, asc, eq, gt, sql } from "drizzle-orm";
 import { db } from "@/server/db";
 import { fields, records } from "@/server/db/schema";
 import { coerceCellValue, isComputed } from "@/lib/fields";
+import { emitChangeEvent } from "@/server/automations/emit";
+
+/** Shallow JSON-value equality for two cell values (stored primitives/arrays). */
+function cellsEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
 
 export async function listRecords(tableId: string, limit = 1000, offset = 0) {
   return db.query.records.findMany({
@@ -36,6 +43,13 @@ export async function createRecord(
     .insert(records)
     .values({ tableId, position, cells, createdBy: userId, updatedBy: userId })
     .returning();
+
+  emitChangeEvent({
+    kind: "record.created",
+    tableId,
+    recordId: record.id,
+    after: record.cells as Record<string, unknown>,
+  });
   return record;
 }
 
@@ -56,7 +70,8 @@ export async function updateRecordCells(
   });
   const byId = new Map(tableFields.map((f) => [f.id, f]));
 
-  const nextCells = { ...(record.cells as Record<string, unknown>) };
+  const before = { ...(record.cells as Record<string, unknown>) };
+  const nextCells = { ...before };
   for (const [fieldId, raw] of Object.entries(patch)) {
     const field = byId.get(fieldId);
     if (!field) throw new Error(`Unknown field ${fieldId}`);
@@ -72,11 +87,36 @@ export async function updateRecordCells(
     .set({ cells: nextCells, updatedBy: userId, updatedAt: sql`now()` })
     .where(eq(records.id, recordId))
     .returning();
+
+  const after = updated.cells as Record<string, unknown>;
+  const changedFieldIds = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(
+    (fieldId) => !cellsEqual(before[fieldId], after[fieldId])
+  );
+  if (changedFieldIds.length) {
+    emitChangeEvent({
+      kind: "record.updated",
+      tableId: record.tableId,
+      recordId,
+      before,
+      after,
+      changedFieldIds,
+    });
+  }
   return updated;
 }
 
 export async function deleteRecord(recordId: string) {
+  const record = await db.query.records.findFirst({ where: eq(records.id, recordId) });
+  if (!record) return;
+
   await db.delete(records).where(eq(records.id, recordId));
+
+  emitChangeEvent({
+    kind: "record.deleted",
+    tableId: record.tableId,
+    recordId,
+    before: record.cells as Record<string, unknown>,
+  });
 }
 
 /** Move a record to a new fractional position between neighbours. */

@@ -276,6 +276,136 @@ export const recordLinks = pgTable(
 );
 
 /* ================================================================== *
+ * AUTOMATIONS  (trigger → action rules, table-scoped)
+ *
+ * An automation watches a table for record changes and runs an ordered
+ * list of action steps. Change events are enqueued after every record
+ * mutation and processed by a separate worker (src/worker). Runs + steps
+ * are persisted for a history/debug view.
+ * ================================================================== */
+export const automationTriggerTypes = [
+  "recordCreated",
+  "recordUpdated", // config: { watch: "all" } | { watch: "fields"; fieldIds: string[] }
+  "recordMatchesCondition", // config: { conjunction; conditions: FilterCondition[] }
+  "recordEntersCondition", // phase change: before did NOT match, after matches
+  "recordDeleted",
+  "scheduled", // config: { cron; timezone? } — stored in v1, worker ignores it
+] as const;
+export type AutomationTriggerType = (typeof automationTriggerTypes)[number];
+
+export const automationActionTypes = [
+  "sendEmail", // { to; subject; body; cc?; bcc? }
+  "sendSlack", // { channel; text }
+  "appendGoogleSheet", // { spreadsheetId; sheetName?; values: string[] }
+  "createRecord", // { tableId; cells: Record<fieldName, string> }
+  "updateRecord", // { recordId; cells: Record<fieldName, string> }
+  "httpRequest", // { method; url; headers?; body? }
+] as const;
+export type AutomationActionType = (typeof automationActionTypes)[number];
+
+export const automationRunStatus = ["running", "success", "error", "skipped"] as const;
+export type AutomationRunStatus = (typeof automationRunStatus)[number];
+
+export const automationStepStatus = ["success", "error", "skipped"] as const;
+export type AutomationStepStatus = (typeof automationStepStatus)[number];
+
+/**
+ * triggerConfig JSONB shapes (keyed by triggerType):
+ *  recordCreated:          {}
+ *  recordUpdated:          { watch: "all" } | { watch: "fields", fieldIds: string[] }
+ *  recordMatchesCondition: { conjunction: "and"|"or", conditions: FilterCondition[] }
+ *  recordEntersCondition:  { conjunction: "and"|"or", conditions: FilterCondition[] }
+ *  recordDeleted:          {}
+ *  scheduled:              { cron: string, timezone?: string }
+ * Action `config` string fields may contain {{Field Name}} interpolation tokens.
+ */
+export const automations = pgTable(
+  "automation",
+  {
+    id: id("aut"),
+    tableId: text("table_id")
+      .notNull()
+      .references(() => tables.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    triggerType: text("trigger_type").$type<AutomationTriggerType>().notNull(),
+    triggerConfig: jsonb("trigger_config").$type<Record<string, unknown>>().notNull().default({}),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: now(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("automation_table_idx").on(t.tableId),
+    index("automation_table_enabled_idx").on(t.tableId, t.enabled),
+  ]
+);
+
+export const automationActions = pgTable(
+  "automation_action",
+  {
+    id: id("act"),
+    automationId: text("automation_id")
+      .notNull()
+      .references(() => automations.id, { onDelete: "cascade" }),
+    type: text("type").$type<AutomationActionType>().notNull(),
+    position: doublePrecision("position").notNull().default(0),
+    config: jsonb("config").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: now(),
+  },
+  (t) => [
+    index("automation_action_aut_idx").on(t.automationId),
+    index("automation_action_aut_pos_idx").on(t.automationId, t.position),
+  ]
+);
+
+export const automationRuns = pgTable(
+  "automation_run",
+  {
+    id: id("run"),
+    automationId: text("automation_id")
+      .notNull()
+      .references(() => automations.id, { onDelete: "cascade" }),
+    tableId: text("table_id")
+      .notNull()
+      .references(() => tables.id, { onDelete: "cascade" }),
+    // NOT an FK: the record may be gone (recordDeleted trigger) yet the run stays.
+    recordId: text("record_id"),
+    status: text("status").$type<AutomationRunStatus>().notNull().default("running"),
+    // Frozen snapshot of the change event that fired this run.
+    trigger: jsonb("trigger").$type<Record<string, unknown>>().notNull().default({}),
+    error: text("error"),
+    startedAt: now(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("automation_run_aut_idx").on(t.automationId),
+    index("automation_run_started_idx").on(t.automationId, t.startedAt),
+  ]
+);
+
+export const automationRunSteps = pgTable(
+  "automation_run_step",
+  {
+    id: id("rst"),
+    runId: text("run_id")
+      .notNull()
+      .references(() => automationRuns.id, { onDelete: "cascade" }),
+    // NOT an FK: action config may be edited/deleted after the run.
+    actionId: text("action_id"),
+    position: doublePrecision("position").notNull().default(0),
+    type: text("type").$type<AutomationActionType>().notNull(),
+    status: text("status").$type<AutomationStepStatus>().notNull(),
+    // Resolved (post-interpolation) input handed to the executor + its result.
+    input: jsonb("input").$type<Record<string, unknown>>().notNull().default({}),
+    output: jsonb("output").$type<Record<string, unknown>>(),
+    error: text("error"),
+    startedAt: now(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [index("automation_run_step_run_idx").on(t.runId)]
+);
+
+/* ================================================================== *
  * RELATIONS (for Drizzle relational queries)
  * ================================================================== */
 export const workspacesRelations = relations(workspaces, ({ many, one }) => ({
@@ -297,6 +427,35 @@ export const tablesRelations = relations(tables, ({ many, one }) => ({
   fields: many(fields),
   views: many(views),
   records: many(records),
+  automations: many(automations),
+}));
+
+export const automationsRelations = relations(automations, ({ many, one }) => ({
+  table: one(tables, { fields: [automations.tableId], references: [tables.id] }),
+  actions: many(automationActions),
+  runs: many(automationRuns),
+}));
+
+export const automationActionsRelations = relations(automationActions, ({ one }) => ({
+  automation: one(automations, {
+    fields: [automationActions.automationId],
+    references: [automations.id],
+  }),
+}));
+
+export const automationRunsRelations = relations(automationRuns, ({ many, one }) => ({
+  automation: one(automations, {
+    fields: [automationRuns.automationId],
+    references: [automations.id],
+  }),
+  steps: many(automationRunSteps),
+}));
+
+export const automationRunStepsRelations = relations(automationRunSteps, ({ one }) => ({
+  run: one(automationRuns, {
+    fields: [automationRunSteps.runId],
+    references: [automationRuns.id],
+  }),
 }));
 
 export const fieldsRelations = relations(fields, ({ one }) => ({

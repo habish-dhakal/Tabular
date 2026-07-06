@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/server/db";
 import { fields, recordLinks, records, tables } from "@/server/db/schema";
+import { emitChangeEvent } from "@/server/automations/emit";
 import type { FieldDTO } from "@/lib/types";
 
 /**
@@ -113,6 +114,22 @@ export async function setLinks(field: FieldDTO, recordId: string, targetIds: str
       if (ids.length)
         await tx.insert(recordLinks).values(ids.map((t) => ({ fieldId: rel, fromRecordId: recordId, toRecordId: t })));
     }
+  });
+
+  // Lightweight change event so recordUpdated triggers can react to link edits.
+  // Limitation (v1): link edges aren't stored in `records.cells`, so before/after
+  // carry only the record's *stored* cell values (unchanged here); the changed
+  // field is signalled via changedFieldIds. Only the edited (primary) side is
+  // emitted — the symmetric reverse record gets no event, and there's no userId.
+  const stored = ((await db.query.records.findFirst({ where: eq(records.id, recordId) }))?.cells ??
+    {}) as Record<string, unknown>;
+  emitChangeEvent({
+    kind: "record.updated",
+    tableId: field.tableId,
+    recordId,
+    before: stored,
+    after: stored,
+    changedFieldIds: [field.id],
   });
 }
 

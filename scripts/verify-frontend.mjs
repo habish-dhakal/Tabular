@@ -93,6 +93,7 @@ async function main() {
     await page.setViewport({ width: 1500, height: 900 });
     page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
     page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
+    page.on("dialog", (d) => d.accept()); // auto-accept confirm()/alert()
     await page.setCookie({ name: "authjs.session-token", value: token, domain: "localhost", path: "/", httpOnly: true });
 
     // dashboard
@@ -206,6 +207,84 @@ async function main() {
       check(`toolbar ${label} opens`, open);
       await page.keyboard.press("Escape"); await sleep(150);
     }
+
+    /* ---- automations: build → save → toggle → test-run → runs ---- */
+    const testid = (id) => `[data-testid="${id}"]`;
+    const clickTestId = async (id, nth = 0) =>
+      page.evaluate((sel, n) => { const els = [...document.querySelectorAll(sel)]; (els[n] ?? els[0])?.click(); },
+        testid(id), nth);
+
+    await page.evaluate((sel) => document.querySelector(sel)?.click(), testid("automations-open"));
+    await page.waitForSelector(testid("automations-panel"), { timeout: 4000 }).catch(() => {});
+    check("automations panel opens", await page.$(testid("automations-panel")) !== null);
+
+    await clickTestId("automation-new");
+    await page.waitForSelector(testid("automation-save"), { timeout: 4000 }).catch(() => {});
+    check("new automation → builder shown", await page.$(testid("automation-save")) !== null);
+    check("automation row in list", (await page.$$(testid("automation-row"))).length >= 1);
+
+    // condition trigger
+    await page.select(testid("trigger-type"), "recordMatchesCondition").catch(() => {});
+    await sleep(200);
+    check("condition trigger UI shown", await page.evaluate(() =>
+      [...document.querySelectorAll("button")].some((b) => b.textContent.trim() === "Add condition")));
+
+    // add a sendEmail action
+    await clickTestId("action-add");
+    await page.waitForSelector(testid("action-type"), { timeout: 3000 }).catch(() => {});
+    check("action step added", await page.$(testid("action-type")) !== null);
+
+    // fill the To field (first input inside the action step) with a literal address
+    await page.evaluate((sel) => {
+      const el = document.querySelector(`${sel} input`);
+      if (el) { el.focus(); }
+    }, testid("action-step"));
+    await page.type(`${testid("action-step")} input`, "hook@example.com").catch(() => {});
+
+    // insert a {{field}} token into the Subject (2nd token-insert in the sendEmail config)
+    await clickTestId("token-insert", 1);
+    await page.waitForSelector('input[placeholder="Search fields…"]', { timeout: 3000 }).catch(() => {});
+    check("token insert popover opens", await page.$('input[placeholder="Search fields…"]') !== null);
+    // click the first field option in the picker popover
+    await page.evaluate(() => {
+      const pop = [...document.body.children].find((c) => c.className?.includes?.("fixed") && c.querySelector('input[placeholder="Search fields…"]'));
+      const btn = pop?.querySelector("button");
+      btn?.click();
+    });
+    await sleep(200);
+    const subjHasToken = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-testid="token-input"]')].some((el) => /\{\{.+\}\}/.test(el.value ?? "")));
+    check("field token inserted into a config input", subjHasToken);
+
+    // save
+    await clickTestId("automation-save");
+    await sleep(900);
+    const autList = await api(j, "GET", `/api/tables/${tableId}/automations`);
+    const built = Array.isArray(autList) ? autList[autList.length - 1] : null;
+    check("automation persisted with condition trigger", built?.triggerType === "recordMatchesCondition", JSON.stringify(built?.triggerType));
+    check("automation persisted a sendEmail action", built?.actions?.[0]?.type === "sendEmail");
+    check("saved action config carries a token", /\{\{.+\}\}/.test(JSON.stringify(built?.actions?.[0]?.config ?? {})));
+
+    // toggle enable off (starts enabled) — assert persisted
+    await clickTestId("automation-toggle");
+    await sleep(600);
+    const afterToggle = await api(j, "GET", `/api/automations/${built.id}`);
+    check("toggle persisted (enabled → false)", afterToggle?.enabled === false);
+
+    // test-run → switches to Runs tab; assert a run + step row appear
+    await clickTestId("automation-test-run");
+    await page.waitForSelector(testid("run-row"), { timeout: 6000 }).catch(() => {});
+    check("test-run produced a run row", (await page.$$(testid("run-row"))).length >= 1);
+    // expand the newest run to reveal its step rows
+    await clickTestId("run-row");
+    await sleep(300);
+    check("run has a step row", (await page.$$(testid("run-step"))).length >= 1);
+    check("runs tab reachable", await page.$(testid("runs-tab")) !== null);
+
+    // close the panel (backdrop click; not dirty after save)
+    await page.mouse.click(6, 6);
+    await sleep(300);
+    check("automations panel closes", await page.$(testid("automations-panel")) === null);
 
     // view types
     for (const [type, label, marker] of [["kanban", "Kanban", "Uncategorized"], ["gallery", "Gallery", "alpha"], ["calendar", "Calendar", "2026"]]) {
