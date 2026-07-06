@@ -7,6 +7,7 @@
 import { evaluateFormula, validateFormula } from "@/lib/formula";
 import { coerceCellValue } from "@/lib/fields";
 import { evaluateCondition } from "@/lib/query";
+import { devLoginAllowed } from "@/server/auth-flags";
 import type { FieldDTO, FilterOp } from "@/lib/types";
 import type { FieldType } from "@/server/db/schema";
 
@@ -217,6 +218,13 @@ eq("date-isBefore", cond(df, "2026-07-01", "isBefore", "2026-07-03"), true);
 eq("date-isAfter", cond(df, "2026-07-05", "isAfter", "2026-07-03"), true);
 eq("date-isOnOrBefore", cond(df, "2026-07-03", "isOnOrBefore", "2026-07-03"), true);
 eq("date-isOnOrAfter", cond(df, "2026-07-03", "isOnOrAfter", "2026-07-03"), true);
+
+/* ============================ AUTH GATING ============================ */
+console.log("— Auth: dev-login gating —");
+eq("dev login on in development", devLoginAllowed({ NODE_ENV: "development" } as NodeJS.ProcessEnv), true);
+eq("dev login on in test", devLoginAllowed({ NODE_ENV: "test" } as NodeJS.ProcessEnv), true);
+eq("dev login OFF in production", devLoginAllowed({ NODE_ENV: "production" } as NodeJS.ProcessEnv), false);
+eq("dev login opt-in in production", devLoginAllowed({ NODE_ENV: "production", ALLOW_DEV_LOGIN: "1" } as NodeJS.ProcessEnv), true);
 
 /* ============================ REPORT ============================ */
 console.log(`\n${pass} passed, ${fails.length} failed`);

@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/server/db";
 import { users, workspaces, workspaceMembers } from "@/server/db/schema";
+import { devLoginAllowed } from "@/server/auth-flags";
 
 declare module "next-auth" {
   interface Session {
@@ -12,10 +13,13 @@ declare module "next-auth" {
   }
 }
 
+export const githubEnabled = !!(process.env.AUTH_GITHUB_ID && process.env.AUTH_GITHUB_SECRET);
+export const devLoginEnabled = devLoginAllowed();
+
 const providers = [];
 
 // GitHub OAuth — only enabled when credentials are present.
-if (process.env.AUTH_GITHUB_ID && process.env.AUTH_GITHUB_SECRET) {
+if (githubEnabled) {
   providers.push(
     GitHub({
       clientId: process.env.AUTH_GITHUB_ID,
@@ -25,10 +29,9 @@ if (process.env.AUTH_GITHUB_ID && process.env.AUTH_GITHUB_SECRET) {
 }
 
 // Dev credentials provider — email only, auto-provisions the user.
-// Replace with proper password hashing or remove in production.
 const devSchema = z.object({ email: z.string().email(), name: z.string().optional() });
 
-providers.push(
+if (devLoginEnabled) providers.push(
   Credentials({
     id: "dev",
     name: "Dev login (email)",
