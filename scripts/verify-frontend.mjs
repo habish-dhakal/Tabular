@@ -286,6 +286,38 @@ async function main() {
     await sleep(300);
     check("automations panel closes", await page.$(testid("automations-panel")) === null);
 
+    /* ---- comments + mentions + notification bell ---- */
+    check("notification bell in top bar", await page.$(testid("notification-bell")) !== null);
+
+    // open the expanded record modal for the KNOWN record (rec1 = "alpha2") so the
+    // server-side check targets the right record. row-expand is hover-only; click programmatically.
+    await page.evaluate(() => {
+      const row = [...document.querySelectorAll("div.group")].find((r) => r.textContent.includes("alpha2"));
+      row?.querySelector('[data-testid="row-expand"]')?.click();
+    });
+    await page.waitForSelector(testid("record-comments"), { timeout: 4000 }).catch(() => {});
+    check("record modal shows comments section", await page.$(testid("record-comments")) !== null);
+
+    // type a comment with an @mention → mention menu appears
+    await page.click(testid("comment-input"));
+    await page.type(testid("comment-input"), "Reviewing this @");
+    await page.waitForSelector(testid("mention-menu"), { timeout: 3000 }).catch(() => {});
+    check("mention menu opens on @", await page.$(testid("mention-menu")) !== null);
+    // pick the first mention candidate, then finish + send
+    await page.evaluate((sel) => document.querySelector(`${sel} button`)?.click(), testid("mention-menu"));
+    await page.type(testid("comment-input"), " looks good");
+    await page.click(testid("comment-send"));
+    await page.waitForSelector(testid("comment"), { timeout: 4000 }).catch(() => {});
+    check("comment posted + shown in thread", await page.$(testid("comment")) !== null);
+    const commentText = await page.evaluate((sel) => document.querySelector(sel)?.textContent ?? "", testid("comment"));
+    check("comment body persisted in UI", commentText.includes("Reviewing this"), commentText);
+    // persisted server-side
+    const cApi = await api(j, "GET", `/api/records/${rec1.id}/comments`);
+    check("comment persisted (server)", Array.isArray(cApi) && cApi.length >= 1, JSON.stringify(cApi));
+    // close the record modal (backdrop)
+    await page.mouse.click(6, 6);
+    await sleep(300);
+
     // view types
     for (const [type, label, marker] of [["kanban", "Kanban", "Uncategorized"], ["gallery", "Gallery", "alpha"], ["calendar", "Calendar", "2026"]]) {
       const v = await api(j, "POST", `/api/tables/${tableId}/views`, { name: `${label} v`, type });

@@ -469,3 +469,56 @@ export const viewsRelations = relations(views, ({ one }) => ({
 export const recordsRelations = relations(records, ({ one }) => ({
   table: one(tables, { fields: [records.tableId], references: [tables.id] }),
 }));
+
+/* ================================================================== *
+ * COLLABORATION  (record comments, @mentions, notifications)
+ * ================================================================== */
+export const comments = pgTable(
+  "comment",
+  {
+    id: id("cmt"),
+    recordId: text("record_id")
+      .notNull()
+      .references(() => records.id, { onDelete: "cascade" }),
+    // Denormalized for access checks + list-by-table without a join.
+    tableId: text("table_id")
+      .notNull()
+      .references(() => tables.id, { onDelete: "cascade" }),
+    authorId: text("author_id").references(() => users.id, { onDelete: "set null" }),
+    body: text("body").notNull(),
+    // User ids @-mentioned in the body (drives notifications).
+    mentions: jsonb("mentions").$type<string[]>().notNull().default([]),
+    createdAt: now(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("comment_record_idx").on(t.recordId, t.createdAt)]
+);
+
+export const notificationType = ["mention", "comment"] as const;
+export type NotificationType = (typeof notificationType)[number];
+
+export const notifications = pgTable(
+  "notification",
+  {
+    id: id("ntf"),
+    // Recipient.
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: text("type").$type<NotificationType>().notNull(),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    tableId: text("table_id").references(() => tables.id, { onDelete: "cascade" }),
+    // NOT FKs: the record/comment may be deleted while the notification stays.
+    recordId: text("record_id"),
+    commentId: text("comment_id"),
+    body: text("body"), // snippet shown in the notification list
+    readAt: timestamp("read_at", { withTimezone: true }),
+    createdAt: now(),
+  },
+  (t) => [index("notification_user_idx").on(t.userId, t.createdAt)]
+);
+
+export const commentsRelations = relations(comments, ({ one }) => ({
+  record: one(records, { fields: [comments.recordId], references: [records.id] }),
+  author: one(users, { fields: [comments.authorId], references: [users.id] }),
+}));

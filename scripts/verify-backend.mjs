@@ -459,6 +459,42 @@ async function main() {
   check("intruder create automation → 404",
     (await autIntruder.req("POST", `/api/tables/${A.tableId}/automations`, { name: "x", triggerType: "recordCreated", actions: [] })).status === 404);
 
+  /* ================================================================ *
+   * COMMENTS + MENTIONS + NOTIFICATIONS
+   * (cross-user mention *delivery* needs member management — not built
+   *  yet; here we cover mention filtering, self-exclude, CRUD, isolation) *
+   * ================================================================ */
+  const CM = await mkTable("Comments", [{ name: "Title", type: "singleLineText" }]);
+  const recCM = await s.req("POST", `/api/tables/${CM.tableId}/records`, { cells: {} });
+
+  const membersRes = await s.req("GET", `/api/tables/${CM.tableId}/members`);
+  check("members endpoint returns owner", membersRes.status === 200 && (membersRes.json?.length ?? 0) >= 1);
+  const me = membersRes.json[0].id;
+
+  const c1 = await s.req("POST", `/api/records/${recCM.json.id}/comments`, {
+    body: "hello @self and a ghost", mentions: [me, "usr_nonmember"],
+  });
+  check("create comment", c1.status === 200 && c1.json.id, c1.json?.error);
+  check("comment author resolved to me", c1.json.author?.id === me);
+  check("comment body persisted", c1.json.body === "hello @self and a ghost");
+  check("non-member mention dropped, member kept", JSON.stringify(c1.json.mentions) === JSON.stringify([me]), JSON.stringify(c1.json.mentions));
+
+  const clist = await s.req("GET", `/api/records/${recCM.json.id}/comments`);
+  check("list comments returns the comment", clist.status === 200 && clist.json.length === 1);
+
+  const notif = await s.req("GET", "/api/notifications");
+  check("notifications endpoint shape", notif.status === 200 && Array.isArray(notif.json.items) && typeof notif.json.unread === "number");
+  check("self-mention creates no notification", notif.json.unread === 0, JSON.stringify(notif.json.unread));
+  check("mark all read ok", (await s.req("PATCH", "/api/notifications", { all: true })).status === 200);
+
+  check("delete own comment", (await s.req("DELETE", `/api/comments/${c1.json.id}`)).status === 200);
+  check("comment list empty after delete", (await s.req("GET", `/api/records/${recCM.json.id}/comments`)).json.length === 0);
+
+  const cmtIntruder = await login("verify-cmt-intruder@tabular.dev");
+  check("intruder GET comments → 404", (await cmtIntruder.req("GET", `/api/records/${recCM.json.id}/comments`)).status === 404);
+  check("intruder POST comment → 404", (await cmtIntruder.req("POST", `/api/records/${recCM.json.id}/comments`, { body: "x", mentions: [] })).status === 404);
+  check("intruder GET members → 404", (await cmtIntruder.req("GET", `/api/tables/${CM.tableId}/members`)).status === 404);
+
   /* ---- tenant isolation ---- */
   const intruder = await login("verify-intruder@tabular.dev");
   check("intruder GET base tables → 404", (await intruder.req("GET", `/api/bases/${baseId}/tables`)).status === 404);

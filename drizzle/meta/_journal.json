@@ -15,6 +15,13 @@
       "when": 1782966851382,
       "tag": "0001_plain_gladiator",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783312621639,
+      "tag": "0002_productive_red_skull",
+      "breakpoints": true
     }
   ]
 }

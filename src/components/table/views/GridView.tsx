@@ -2,8 +2,9 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Maximize2 } from "lucide-react";
 import { useTable } from "@/components/table/TableProvider";
+import { RecordModal } from "@/components/table/RecordModal";
 import { FieldHeaderMenu } from "@/components/table/FieldHeaderMenu";
 import { FieldEditor } from "@/components/table/FieldEditor";
 import { Popover } from "@/components/ui/Popover";
@@ -33,6 +34,7 @@ export function GridView() {
   const parentRef = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState<{ recordId: string; fieldId: string; rect?: DOMRect } | null>(null);
   const [viewing, setViewing] = useState<{ recordId: string; fieldId: string; rect: DOMRect } | null>(null);
+  const [expanded, setExpanded] = useState<RecordDTO | null>(null);
 
   const rowH = ROW_HEIGHTS[config.rowHeight ?? "short"];
   const hidden = new Set(config.hiddenFieldIds ?? []);
@@ -107,7 +109,10 @@ export function GridView() {
               <div key={record.id} className="group absolute left-0 flex border-b border-border-token hover:bg-surface/60" style={{ top: vi.start, height: rowH, width: "100%" }}>
                 <div className="flex items-center justify-between border-r border-border-token px-2 text-xs text-muted" style={{ width: GUTTER_W }}>
                   <span className="group-hover:hidden">{vi.index + 1}</span>
-                  <button onClick={() => deleteRecord(record.id)} className="hidden text-muted hover:text-red-600 group-hover:block"><Trash2 size={13} /></button>
+                  <div className="hidden items-center gap-1.5 group-hover:flex">
+                    <button onClick={() => setExpanded(record)} data-testid="row-expand" title="Expand record" className="text-muted hover:text-accent"><Maximize2 size={12} /></button>
+                    <button onClick={() => deleteRecord(record.id)} title="Delete record" className="text-muted hover:text-red-600"><Trash2 size={13} /></button>
+                  </div>
                 </div>
                 {visibleFields.map((f) => {
                   const value = computeCellValue(f, record, fields);
@@ -180,6 +185,7 @@ export function GridView() {
           </CellPopover>
         );
       })()}
+      {expanded && <RecordModal record={expanded} onClose={() => setExpanded(null)} />}
     </div>
   );
 }

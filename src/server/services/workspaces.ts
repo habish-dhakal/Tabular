@@ -2,6 +2,45 @@ import { asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/server/db";
 import { bases, tables, users, workspaceMembers, workspaces } from "@/server/db/schema";
 
+export interface MemberDTO {
+  id: string;
+  name: string | null;
+  email: string;
+  image: string | null;
+  role: string;
+}
+
+/** Workspace members for the workspace that owns `tableId` (mention candidates). */
+export async function listMembersForTable(tableId: string): Promise<MemberDTO[]> {
+  const row = await db
+    .select({ workspaceId: bases.workspaceId })
+    .from(tables)
+    .innerJoin(bases, eq(tables.baseId, bases.id))
+    .where(eq(tables.id, tableId))
+    .limit(1);
+  const workspaceId = row[0]?.workspaceId;
+  if (!workspaceId) return [];
+
+  const rows = await db
+    .select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      image: users.image,
+      role: workspaceMembers.role,
+    })
+    .from(workspaceMembers)
+    .innerJoin(users, eq(workspaceMembers.userId, users.id))
+    .where(eq(workspaceMembers.workspaceId, workspaceId));
+  return rows;
+}
+
+/** The set of member user ids for the workspace owning `tableId`. */
+export async function memberIdsForTable(tableId: string): Promise<Set<string>> {
+  const members = await listMembersForTable(tableId);
+  return new Set(members.map((m) => m.id));
+}
+
 /**
  * Guarantee the user belongs to at least one workspace. Prevents an
  * authenticated user from ever hitting a "no workspaces" dead-end

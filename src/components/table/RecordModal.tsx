@@ -6,12 +6,13 @@ import { useTable } from "@/components/table/TableProvider";
 import { CellDisplay, CellEditor } from "@/components/Cell";
 import { CellPopover } from "@/components/cell-editors/CellPopover";
 import { LinkPicker, type LinkChip } from "@/components/cell-editors/LinkPicker";
+import { RecordComments } from "@/components/comments/RecordComments";
 import { FIELD_TYPE_META, isComputed } from "@/lib/fields";
 import { computeCellValue } from "@/lib/compute";
 import type { RecordDTO } from "@/lib/types";
 
 export function RecordModal({ record, onClose }: { record: RecordDTO; onClose: () => void }) {
-  const { fields, commitCell, records, setRecordLinks } = useTable();
+  const { fields, commitCell, records, setRecordLinks, table } = useTable();
   const [editing, setEditing] = useState<{ fieldId: string; rect: DOMRect } | null>(null);
 
   // Always read the freshest copy from context.
@@ -68,6 +69,7 @@ export function RecordModal({ record, onClose }: { record: RecordDTO; onClose: (
               </div>
             );
           })}
+          {table && <RecordComments recordId={live.id} tableId={table.id} />}
         </div>
       </div>
     </div>

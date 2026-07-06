@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { signOut } from "next-auth/react";
 import { LogOut } from "lucide-react";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 
 export function TopBar({ email, children }: { email?: string | null; children?: React.ReactNode }) {
   return (
@@ -14,6 +15,7 @@ export function TopBar({ email, children }: { email?: string | null; children?: 
         {children}
       </div>
       <div className="flex items-center gap-3 text-sm text-muted">
+        <NotificationBell />
         {email && <span className="hidden sm:inline">{email}</span>}
         <button
           onClick={() => signOut({ callbackUrl: "/login" })}

@@ -14,6 +14,8 @@ export class AccessError extends Error {
 }
 
 const WRITE_ROLES: WorkspaceRole[] = ["owner", "admin", "editor"];
+// Roles allowed to comment (everyone with access except plain viewers).
+const COMMENT_ROLES: WorkspaceRole[] = ["owner", "admin", "editor", "commenter"];
 
 async function roleInWorkspace(userId: string, workspaceId: string) {
   const m = await db.query.workspaceMembers.findFirst({
@@ -60,5 +62,17 @@ export async function assertTableAccess(userId: string, tableId: string, write =
   const wsId = await workspaceIdForTable(tableId);
   if (!wsId) throw new AccessError(404, "Table not found");
   await assertWorkspaceAccess(userId, wsId, write);
+  return wsId;
+}
+
+/** Assert the user may comment on this table's records (commenter role or above). */
+export async function assertTableCommentAccess(userId: string, tableId: string) {
+  const wsId = await workspaceIdForTable(tableId);
+  if (!wsId) throw new AccessError(404, "Table not found");
+  const role = await roleInWorkspace(userId, wsId);
+  if (!role) throw new AccessError(404, "Table not found");
+  if (!COMMENT_ROLES.includes(role)) {
+    throw new AccessError(403, "You don't have permission to comment here");
+  }
   return wsId;
 }
