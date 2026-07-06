@@ -14,6 +14,11 @@ function choicesOf(field: FieldDTO): SelectChoice[] {
   return (field.options.choices as SelectChoice[]) ?? [];
 }
 
+// Pill used for linked-record chips + lookup values. Rounded, bordered, shows
+// the full label; only genuinely long names ellipsize (max-w + truncate).
+const CHIP_CLS =
+  "inline-flex max-w-[180px] shrink-0 items-center truncate rounded-full border border-border-token bg-surface px-2 py-[3px] text-xs font-medium text-foreground/80";
+
 /* -------- timezone-safe date helpers -------- */
 function fmtDate(v: unknown): string {
   const s = String(v);
@@ -116,10 +121,10 @@ export function CellDisplay({ field, value, expanded }: { field: FieldDTO; value
       const chips = Array.isArray(value) ? (value as { id: string; label: string }[]) : [];
       if (chips.length === 0) return <span className="text-transparent">·</span>;
       return (
-        <span className={expanded ? "flex flex-wrap gap-1" : "flex gap-1 overflow-hidden"}>
+        <span className={expanded ? "flex flex-wrap gap-1.5" : "flex gap-1.5 overflow-hidden"}>
           {chips.map((c) => (
-            <span key={c.id} className="inline-flex max-w-full items-center gap-1 truncate rounded bg-surface px-1.5 py-0.5 text-xs">
-              <span className="truncate">{c.label}</span>
+            <span key={c.id} className={CHIP_CLS}>
+              {c.label}
             </span>
           ))}
         </span>
@@ -130,9 +135,9 @@ export function CellDisplay({ field, value, expanded }: { field: FieldDTO; value
       const vals = Array.isArray(value) ? value : [value];
       if (vals.length === 0) return <span className="text-transparent">·</span>;
       return (
-        <span className={expanded ? "flex flex-wrap gap-1" : "flex gap-1 overflow-hidden"}>
+        <span className={expanded ? "flex flex-wrap gap-1.5" : "flex gap-1.5 overflow-hidden"}>
           {vals.map((v, i) => (
-            <span key={i} className="inline-block max-w-full truncate rounded bg-surface px-1.5 py-0.5 text-xs">
+            <span key={i} className={CHIP_CLS}>
               {String(v)}
             </span>
           ))}
