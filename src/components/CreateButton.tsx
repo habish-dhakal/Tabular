@@ -43,7 +43,7 @@ export function CreateButton({
       disabled={busy}
       className={
         className ??
-        "flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+        "flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-contrast shadow-sm transition hover:bg-accent-hover disabled:opacity-50"
       }
     >
       <Plus size={16} />

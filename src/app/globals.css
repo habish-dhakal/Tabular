@@ -1,12 +1,24 @@
 @import "tailwindcss";
 
+/*
+ * Tabular design system — "warm calm" premium.
+ * Warm off-white paper canvas, forest-green accent, soft depth. Deliberately
+ * off the default indigo/cool-gray palette so the app reads as crafted, not
+ * templated. Everything downstream is token-driven, so tuning happens here.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #1a1a1a;
-  --border: #e5e7eb;
-  --muted: #6b7280;
-  --surface: #f9fafb;
-  --accent: #6366f1;
+  --background: #fbfaf7;   /* warm paper */
+  --surface: #f2efe8;      /* raised surface / wells */
+  --surface-2: #e9e5db;    /* deeper surface / hover */
+  --foreground: #23201a;   /* warm ink */
+  --muted: #857f72;        /* warm gray text */
+  --border: #e7e1d5;       /* warm hairline */
+
+  --accent: #1f6f5c;       /* forest */
+  --accent-hover: #1a5e4e;
+  --accent-contrast: #ffffff;
+  --accent-soft: #e6efe9;  /* accent tint (badges, hover) */
+  --ring: rgba(31, 111, 92, 0.28);
 }
 
 @theme inline {
@@ -15,29 +27,47 @@
   --color-border-token: var(--border);
   --color-muted: var(--muted);
   --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
   --color-accent: var(--accent);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-contrast: var(--accent-contrast);
+  --color-accent-soft: var(--accent-soft);
+  --color-ring: var(--ring);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  /* Soft, warm-tinted shadows — depth without the hard drop-shadow look. */
+  --shadow-xs: 0 1px 2px rgba(35, 32, 26, 0.05);
+  --shadow-sm: 0 1px 2px rgba(35, 32, 26, 0.05), 0 2px 6px rgba(35, 32, 26, 0.05);
+  --shadow-md: 0 4px 12px rgba(35, 32, 26, 0.07), 0 2px 4px rgba(35, 32, 26, 0.04);
+  --shadow-lg: 0 12px 32px rgba(35, 32, 26, 0.10), 0 4px 8px rgba(35, 32, 26, 0.05);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Thin scrollbars for the grid */
+::selection {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+
+/* Thin, warm scrollbars for the grid + panels */
 .thin-scroll::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 .thin-scroll::-webkit-scrollbar-thumb {
-  background: #d1d5db;
-  border-radius: 6px;
+  background: #cfc8b9;
+  border-radius: 8px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 .thin-scroll::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
+  background: #b3ab99;
   background-clip: content-box;
 }

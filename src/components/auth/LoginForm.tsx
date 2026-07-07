@@ -40,11 +40,12 @@ export function LoginForm({ devLogin, github }: { devLogin: boolean; github: boo
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-surface px-4">
-      <div className="w-full max-w-sm rounded-xl border border-border-token bg-background p-8 shadow-sm">
-        <div className="mb-6 text-center">
-          <div className="text-2xl font-bold tracking-tight">
-            <span className="text-accent">Tabular</span>
-          </div>
+      <div className="w-full max-w-sm rounded-2xl border border-border-token bg-background p-8 shadow-lg">
+        <div className="mb-7 flex flex-col items-center text-center">
+          <span className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-accent text-lg font-bold text-accent-contrast shadow-sm">
+            T
+          </span>
+          <div className="text-xl font-semibold tracking-tight">Tabular</div>
           <p className="mt-1 text-sm text-muted">Sign in to your workspace</p>
         </div>
 
@@ -93,7 +94,7 @@ export function LoginForm({ devLogin, github }: { devLogin: boolean; github: boo
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full rounded-lg bg-accent py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50"
+                className="w-full rounded-lg bg-accent py-2.5 text-sm font-medium text-accent-contrast shadow-sm transition hover:bg-accent-hover disabled:opacity-50"
               >
                 {loading ? "Signing in…" : "Continue"}
               </button>
