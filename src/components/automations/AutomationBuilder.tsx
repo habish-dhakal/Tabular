@@ -6,13 +6,14 @@ import { useTable } from "@/components/table/TableProvider";
 import { useAutomations } from "@/components/automations/AutomationsProvider";
 import { TriggerSection } from "@/components/automations/TriggerSection";
 import { ActionList } from "@/components/automations/ActionList";
-import type { AutomationAction, AutomationDTO, TriggerType } from "@/lib/types";
+import { buildTree, toNested } from "@/components/automations/tree";
+import type { ActionNode, AutomationDTO, TriggerType } from "@/lib/types";
 
 interface Draft {
   name: string;
   triggerType: TriggerType;
   triggerConfig: Record<string, unknown>;
-  actions: AutomationAction[];
+  actions: ActionNode[];
 }
 
 function toDraft(a: AutomationDTO): Draft {
@@ -20,7 +21,7 @@ function toDraft(a: AutomationDTO): Draft {
     name: a.name,
     triggerType: a.triggerType,
     triggerConfig: a.triggerConfig ?? {},
-    actions: (a.actions ?? []).map((ac) => ({ ...ac })),
+    actions: buildTree(a.actions ?? []),
   };
 }
 
@@ -53,7 +54,7 @@ export function AutomationBuilder({
       name: draft.name.trim() || "Untitled automation",
       triggerType: draft.triggerType,
       triggerConfig: draft.triggerConfig,
-      actions: draft.actions.map((a) => ({ type: a.type, config: a.config })),
+      actions: toNested(draft.actions),
     });
     setSaving(false);
     return !!res;
@@ -107,7 +108,7 @@ export function AutomationBuilder({
 
       <section>
         <h4 className="mb-2 text-sm font-medium">Actions</h4>
-        <ActionList actions={draft.actions} onChange={(actions) => patch({ actions })} />
+        <ActionList nodes={draft.actions} onChange={(actions) => patch({ actions })} />
       </section>
     </div>
   );

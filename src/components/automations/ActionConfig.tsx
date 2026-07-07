@@ -147,6 +147,25 @@ export function ActionConfig({
         </div>
       );
 
+    case "runScript":
+      return (
+        <div className="space-y-2">
+          <Label>JavaScript</Label>
+          <textarea
+            data-testid="script-code"
+            value={str("code")}
+            onChange={(e) => set({ code: e.target.value })}
+            spellCheck={false}
+            rows={8}
+            placeholder={"// input.record = this record's fields (by name)\n// input.item  = current loop item (or null)\nconst total = input.record.Score * 2;\noutput.set('doubled', total);"}
+            className="w-full rounded-md border border-border-token bg-background px-2 py-1.5 font-mono text-xs outline-none focus:border-accent"
+          />
+          <p className="rounded bg-background px-2 py-1 text-xs text-muted">
+            Sandboxed &amp; synchronous — no network or file access. Read <code className="text-foreground">input.record</code> / <code className="text-foreground">input.item</code>, emit with <code className="text-foreground">output.set(key, value)</code>, then use <code className="text-foreground">{"{{output.key}}"}</code> in later steps.
+          </p>
+        </div>
+      );
+
     case "httpRequest":
       return (
         <div className="space-y-3">

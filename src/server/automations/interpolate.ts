@@ -18,6 +18,7 @@ import type { FieldDTO } from "@/lib/types";
  */
 const TOKEN_RE = /\{\{\s*([^}]+?)\s*\}\}/g;
 const ITEM_PREFIX_RE = /^(?:item|current item)\.(.+)$/i;
+const OUTPUT_PREFIX_RE = /^output\.(.+)$/i;
 
 /** The current loop item exposed to `{{item.*}}` tokens. */
 export interface ItemContext {
@@ -41,7 +42,8 @@ export type Interpolator = <T>(value: T) => T;
 export function makeInterpolator(
   fields: FieldDTO[],
   cells: Record<string, unknown>,
-  item?: ItemContext
+  item?: ItemContext,
+  outputs?: Record<string, unknown>
 ): Interpolator {
   const idByName = new Map(fields.map((f) => [f.name.toLowerCase(), f.id]));
   const itemIdByName = item
@@ -50,6 +52,11 @@ export function makeInterpolator(
 
   const interpolateString = (str: string): string =>
     str.replace(TOKEN_RE, (_match, rawName: string) => {
+      const outputMatch = rawName.match(OUTPUT_PREFIX_RE);
+      if (outputMatch) {
+        // {{output.key}} — a value emitted by an earlier runScript step.
+        return outputs ? stringifyCell(outputs[outputMatch[1].trim()]) : "";
+      }
       const itemMatch = rawName.match(ITEM_PREFIX_RE);
       if (itemMatch) {
         if (!itemIdByName || !item) return ""; // {{item.*}} outside a loop

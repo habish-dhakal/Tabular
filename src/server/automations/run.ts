@@ -12,6 +12,7 @@ import { resolveSenders, type Senders } from "@/server/integrations/senders";
 import { runWithAutomationContext } from "./context";
 import { makeInterpolator, type ItemContext } from "./interpolate";
 import { executors, type ExecutorContext } from "./executors";
+import { runUserScript } from "./sandbox";
 import {
   buildActionTree,
   resolveLoopItems,
@@ -38,6 +39,13 @@ function eventCells(event: ChangeEvent): Record<string, unknown> {
 
 /** Thrown to unwind the recursion when a step fails (fail-fast). */
 class StepFailure extends Error {}
+
+/** Project a record's cells (keyed by field id) into a name→value map for scripts. */
+function cellsByName(fields: FieldDTO[], cells: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const f of fields) out[f.name] = cells[f.id];
+  return out;
+}
 
 /** Evaluate a conditional group's `{ conjunction, conditions }` against a record. */
 function conditionsMatch(
@@ -103,13 +111,16 @@ export async function runAutomation(
   let runStatus: "success" | "error" = "success";
   let runError: string | null = null;
   let stepCount = 0;
+  // Values emitted by runScript steps via output.set(), referenceable by later
+  // steps as {{output.key}}.
+  const scriptOutputs: Record<string, unknown> = {};
 
   const runNodes = async (nodes: ActionNode[], item: ItemContext | undefined, depth: number) => {
     // The record conditions/tokens resolve against: the loop item if inside a
     // loop, otherwise the trigger record.
     const curFields = item?.fields ?? triggerFields;
     const curCells = item?.cells ?? triggerCells;
-    const interpolate = makeInterpolator(triggerFields, triggerCells, item);
+    const interpolate = makeInterpolator(triggerFields, triggerCells, item, scriptOutputs);
 
     for (const node of nodes) {
       if (node.kind === "loop") {
@@ -133,12 +144,39 @@ export async function runAutomation(
 
       // Leaf action.
       if (++stepCount > MAX_RUN_STEPS) throw new StepFailure(`run exceeds ${MAX_RUN_STEPS} steps`);
-      if (!node.type || !executors[node.type]) throw new StepFailure(`unknown action type "${node.type}"`);
+      const position = stepCount;
+
+      // runScript is handled here (not via executors) — it needs the current
+      // record/item + captures outputs for later {{output.*}} tokens.
+      if (node.type === "runScript") {
+        const code = String(node.config.code ?? "");
+        const scriptInput = {
+          record: cellsByName(curFields, curCells),
+          item: item ? cellsByName(item.fields, item.cells) : null,
+        };
+        try {
+          const { outputs, logs } = await runUserScript(code, scriptInput);
+          Object.assign(scriptOutputs, outputs);
+          await db.insert(automationRunSteps).values({
+            runId: run.id, actionId: node.id, position, type: "runScript", status: "success", input: { code }, output: { outputs, logs }, finishedAt: new Date(),
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          await db.insert(automationRunSteps).values({
+            runId: run.id, actionId: node.id, position, type: "runScript", status: "error", input: { code }, error: message, finishedAt: new Date(),
+          });
+          runError = message;
+          throw new StepFailure(message);
+        }
+        continue;
+      }
+
+      const executor = node.type ? executors[node.type] : undefined;
+      if (!node.type || !executor) throw new StepFailure(`unknown action type "${node.type}"`);
       const actionType = node.type;
       const input = interpolate(node.config) as Record<string, unknown>;
-      const position = stepCount;
       try {
-        const output = await executors[actionType](input, ctx);
+        const output = await executor(input, ctx);
         await db.insert(automationRunSteps).values({
           runId: run.id, actionId: node.id, position, type: actionType, status: "success", input, output, finishedAt: new Date(),
         });

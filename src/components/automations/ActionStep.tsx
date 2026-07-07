@@ -1,9 +1,9 @@
 "use client";
 
-import { ChevronDown, ChevronUp, Mail, MessageSquare, Sheet, PlusSquare, PencilLine, Globe, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Mail, MessageSquare, Sheet, PlusSquare, PencilLine, Globe, Code, Trash2 } from "lucide-react";
 import { ActionConfig } from "@/components/automations/ActionConfig";
 import { automationActionTypes } from "@/server/db/schema";
-import type { ActionType, AutomationAction } from "@/lib/types";
+import type { ActionType, ActionNode } from "@/lib/types";
 
 export const ACTION_META: Record<ActionType, { label: string; icon: typeof Mail }> = {
   sendEmail: { label: "Send email", icon: Mail },
@@ -12,6 +12,7 @@ export const ACTION_META: Record<ActionType, { label: string; icon: typeof Mail 
   createRecord: { label: "Create record", icon: PlusSquare },
   updateRecord: { label: "Update record", icon: PencilLine },
   httpRequest: { label: "Send HTTP request", icon: Globe },
+  runScript: { label: "Run a script", icon: Code },
 };
 
 export function ActionStep({
@@ -23,13 +24,14 @@ export function ActionStep({
   onMove,
 }: {
   index: number;
-  action: AutomationAction;
+  action: ActionNode;
   count: number;
-  onChange: (next: AutomationAction) => void;
+  onChange: (next: ActionNode) => void;
   onRemove: () => void;
   onMove: (dir: -1 | 1) => void;
 }) {
-  const Icon = ACTION_META[action.type].icon;
+  const actionType: ActionType = action.type ?? "sendEmail";
+  const Icon = ACTION_META[actionType].icon;
   return (
     <div className="rounded-lg border border-border-token bg-surface" data-testid="action-step">
       <div className="flex items-center gap-2 border-b border-border-token px-3 py-2">
@@ -39,7 +41,7 @@ export function ActionStep({
         <Icon size={15} className="text-accent" />
         <select
           data-testid="action-type"
-          value={action.type}
+          value={actionType}
           onChange={(e) => onChange({ ...action, type: e.target.value as ActionType, config: {} })}
           className="flex-1 rounded-md border border-border-token bg-background px-2 py-1 text-sm outline-none focus:border-accent"
         >
@@ -52,7 +54,7 @@ export function ActionStep({
         <button data-testid="action-remove" onClick={onRemove} className="text-muted hover:text-red-600"><Trash2 size={15} /></button>
       </div>
       <div className="p-3">
-        <ActionConfig type={action.type} config={action.config} onChange={(config) => onChange({ ...action, config })} />
+        <ActionConfig type={actionType} config={action.config} onChange={(config) => onChange({ ...action, config })} />
       </div>
     </div>
   );

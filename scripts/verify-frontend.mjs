@@ -265,6 +265,20 @@ async function main() {
     check("automation persisted a sendEmail action", built?.actions?.[0]?.type === "sendEmail");
     check("saved action config carries a token", /\{\{.+\}\}/.test(JSON.stringify(built?.actions?.[0]?.config ?? {})));
 
+    // advanced logic: add a repeating group with a nested action, save, assert the tree persists
+    await clickTestId("action-add-loop");
+    await page.waitForSelector(testid("loop-step"), { timeout: 3000 }).catch(() => {});
+    check("repeating group renders in builder", await page.$(testid("loop-step")) !== null);
+    await page.evaluate((s) => document.querySelector(s)?.click(), `${testid("loop-step")} ${testid("action-add")}`);
+    await sleep(300);
+    await clickTestId("automation-save");
+    await sleep(900);
+    const withLoop = await api(j, "GET", `/api/tables/${tableId}/automations`);
+    const built2 = Array.isArray(withLoop) ? withLoop[withLoop.length - 1] : null;
+    const loopNode = built2?.actions?.find((a) => a.kind === "loop");
+    check("loop node persisted from builder", !!loopNode && loopNode.type == null);
+    check("loop has a nested child action", built2?.actions?.some((a) => a.kind === "action" && a.parentId === loopNode?.id));
+
     // toggle enable off (starts enabled) — assert persisted
     await clickTestId("automation-toggle");
     await sleep(600);

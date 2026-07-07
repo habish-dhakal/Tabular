@@ -24,7 +24,9 @@ export type Executor = (
   ctx: ExecutorContext
 ) => Promise<Record<string, unknown>>;
 
-export const executors: Record<AutomationActionType, Executor> = {
+// `runScript` is intentionally absent — it's handled in the runner (it needs
+// the current record/item + captures outputs), not through a plain executor.
+export const executors: Partial<Record<AutomationActionType, Executor>> = {
   sendEmail,
   sendSlack,
   appendGoogleSheet,

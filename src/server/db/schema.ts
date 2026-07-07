@@ -301,6 +301,7 @@ export const automationActionTypes = [
   "createRecord", // { tableId; cells: Record<fieldName, string> }
   "updateRecord", // { recordId; cells: Record<fieldName, string> }
   "httpRequest", // { method; url; headers?; body? }
+  "runScript", // { code } — sandboxed JS (isolated-vm); output.set() → {{output.key}}
 ] as const;
 export type AutomationActionType = (typeof automationActionTypes)[number];
 

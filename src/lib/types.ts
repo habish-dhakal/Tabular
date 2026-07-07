@@ -1,4 +1,5 @@
 import type {
+  AutomationActionKind,
   AutomationActionType,
   AutomationTriggerType,
   FieldType,
@@ -90,11 +91,25 @@ export interface AutomationTrigger {
   config: Record<string, unknown>;
 }
 
+export type ActionKind = AutomationActionKind;
+
+/** A stored action row (flat, as returned by the API). */
 export interface AutomationAction {
   id: string;
-  type: ActionType;
+  kind?: ActionKind; // defaults to "action"
+  type: ActionType | null; // null for loop/conditional group nodes
   position: number;
+  parentId?: string | null;
   config: Record<string, unknown>;
+}
+
+/** An action assembled into the builder's tree (group nodes carry children). */
+export interface ActionNode {
+  id: string;
+  kind: ActionKind;
+  type: ActionType | null;
+  config: Record<string, unknown>;
+  children: ActionNode[];
 }
 
 export interface AutomationDTO {

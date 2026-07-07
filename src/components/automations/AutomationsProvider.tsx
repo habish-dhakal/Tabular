@@ -2,13 +2,14 @@
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import type { AutomationDTO, AutomationRunDTO, TriggerType } from "@/lib/types";
+import type { NestedAction } from "@/components/automations/tree";
 
 export interface SaveInput {
   name?: string;
   enabled?: boolean;
   triggerType?: TriggerType;
   triggerConfig?: Record<string, unknown>;
-  actions?: { type: string; config: Record<string, unknown> }[];
+  actions?: NestedAction[];
 }
 
 interface AutomationsCtx {

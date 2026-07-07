@@ -532,6 +532,48 @@ async function main() {
   check("conditional gates loop body (only B)", lout2After.length - lout2Before === 1 && newVals.length === 1, `delta ${lout2After.length - lout2Before}, B=${newVals.length}`);
 
   /* ================================================================ *
+   * runScript: sandboxed JS action (isolated-vm)
+   * ================================================================ */
+  const SCR = await mkTable("Script Src", [{ name: "Score", type: "number" }]);
+  const SOUT = await mkTable("Script Out", [{ name: "Val", type: "singleLineText" }]);
+  const scrRec = await s.req("POST", `/api/tables/${SCR.tableId}/records`, { cells: { [SCR.fids.Score]: 21 } });
+
+  // Script computes a value; a later action consumes it via {{output.*}}.
+  const scriptAut = await s.req("POST", `/api/tables/${SCR.tableId}/automations`, {
+    name: "Compute + use output",
+    triggerType: "recordCreated",
+    triggerConfig: {},
+    actions: [
+      { type: "runScript", config: { code: "output.set('doubled', input.record.Score * 2);" } },
+      { type: "createRecord", config: { tableId: SOUT.tableId, cells: { Val: "{{output.doubled}}" } } },
+    ],
+  });
+  check("create runScript automation", scriptAut.status === 200 && scriptAut.json.id, scriptAut.json?.error);
+  check("runScript action persisted", (scriptAut.json.actions ?? []).some((a) => a.type === "runScript"));
+  const soutBefore = (await s.req("GET", `/api/tables/${SOUT.tableId}/records`)).json.records.length;
+  const scrRun = await s.req("POST", `/api/automations/${scriptAut.json.id}/test`, { recordId: scrRec.json.id });
+  check("runScript run success", scrRun.status === 200 && scrRun.json.status === "success", JSON.stringify(scrRun.json));
+  const soutAfter = (await s.req("GET", `/api/tables/${SOUT.tableId}/records`)).json.records;
+  check("script output flows to next step via {{output.*}}", soutAfter.length - soutBefore === 1 && soutAfter.some((r) => r.cells[SOUT.fids.Val] === "42"), JSON.stringify(soutAfter.map((r) => r.cells[SOUT.fids.Val])));
+
+  // Sandbox denies host access (verified end-to-end through the run's step output).
+  const isoAut = (await s.req("POST", `/api/tables/${SCR.tableId}/automations`, {
+    name: "Isolation", triggerType: "recordCreated", triggerConfig: {},
+    actions: [{ type: "runScript", config: { code: "output.set('proc', typeof process); output.set('req', typeof require);" } }],
+  })).json;
+  await s.req("POST", `/api/automations/${isoAut.id}/test`, { recordId: scrRec.json.id });
+  const isoOut = ((await runsOf(isoAut.id))[0]?.steps ?? []).find((st) => st.type === "runScript")?.output?.outputs ?? {};
+  check("sandbox denies host globals (no process/require)", isoOut.proc === "undefined" && isoOut.req === "undefined", JSON.stringify(isoOut));
+
+  // A throwing script fails the run (fail-fast) and is logged.
+  const badAut = (await s.req("POST", `/api/tables/${SCR.tableId}/automations`, {
+    name: "Bad script", triggerType: "recordCreated", triggerConfig: {},
+    actions: [{ type: "runScript", config: { code: "throw new Error('boom');" } }],
+  })).json;
+  const badRun = await s.req("POST", `/api/automations/${badAut.id}/test`, { recordId: scrRec.json.id });
+  check("throwing script → run error", badRun.status === 200 && badRun.json.status === "error", JSON.stringify(badRun.json));
+
+  /* ================================================================ *
    * COMMENTS + MENTIONS + NOTIFICATIONS
    * (cross-user mention *delivery* needs member management — not built
    *  yet; here we cover mention filtering, self-exclude, CRUD, isolation) *
