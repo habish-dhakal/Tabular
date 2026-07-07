@@ -19,9 +19,9 @@ export function RecordModal({ record, onClose }: { record: RecordDTO; onClose: (
   const live = records.find((r) => r.id === record.id) ?? record;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 p-4 pt-20" onClick={onClose}>
+    <div className="anim-fade fixed inset-0 z-50 flex items-start justify-center bg-black/25 p-4 pt-20 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="w-full max-w-lg rounded-xl border border-border-token bg-background shadow-xl"
+        className="anim-modal w-full max-w-lg rounded-2xl border border-border-token bg-background shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-border-token px-4 py-3">

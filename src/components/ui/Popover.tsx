@@ -99,7 +99,7 @@ export function Popover({
           <div
             ref={panelRef}
             className={cn(
-              "thin-scroll fixed z-50 overflow-y-auto rounded-lg border border-border-token bg-background p-2 shadow-lg",
+              "anim-pop thin-scroll fixed z-50 overflow-y-auto rounded-xl border border-border-token bg-background p-2 shadow-lg",
               className
             )}
             style={{

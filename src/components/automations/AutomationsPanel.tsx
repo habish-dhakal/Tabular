@@ -28,15 +28,15 @@ export function AutomationsPanel() {
   const selectAutomation = (id: string) => guarded(() => { select(id); setTab("build"); });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={close}>
+    <div className="anim-fade fixed inset-0 z-50 flex items-center justify-center bg-black/25 p-4 backdrop-blur-sm" onClick={close}>
       <div
         data-testid="automations-panel"
-        className="flex h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-border-token bg-background shadow-2xl"
+        className="anim-modal flex h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border-token bg-background shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-border-token px-4 py-3">
-          <h3 className="font-medium">Automations</h3>
-          <button onClick={close} className="text-muted hover:text-foreground"><X size={18} /></button>
+        <div className="flex items-center justify-between border-b border-border-token px-5 py-3.5">
+          <h3 className="text-sm font-semibold tracking-tight">Automations</h3>
+          <button onClick={close} className="rounded-lg p-1 text-muted transition hover:bg-surface hover:text-foreground"><X size={18} /></button>
         </div>
 
         <div className="flex min-h-0 flex-1">

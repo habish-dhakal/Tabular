@@ -37,12 +37,14 @@ export function AutomationList({
             onClick={() => onSelect(a.id)}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(a.id); } }}
             className={cn(
-              "flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left transition outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
-              a.id === selectedId ? "bg-accent/10" : "hover:bg-surface"
+              "flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left transition outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              a.id === selectedId
+                ? "bg-accent-soft ring-1 ring-accent/20"
+                : "hover:bg-surface"
             )}
           >
             <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-medium">{a.name}</div>
+              <div className={cn("truncate text-sm font-medium", a.id === selectedId && "text-accent-hover")}>{a.name}</div>
               <div className="truncate text-xs text-muted">{TRIGGER_SHORT[a.triggerType]}</div>
             </div>
             <Toggle
@@ -58,7 +60,7 @@ export function AutomationList({
         <button
           data-testid="automation-new"
           onClick={() => create()}
-          className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border-token py-2 text-sm text-accent hover:bg-surface"
+          className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-accent py-2 text-sm font-medium text-accent-contrast shadow-sm transition hover:bg-accent-hover"
         >
           <Plus size={15} /> New automation
         </button>

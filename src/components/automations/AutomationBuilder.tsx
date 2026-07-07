@@ -78,13 +78,13 @@ export function AutomationBuilder({
           value={draft.name}
           onChange={(e) => patch({ name: e.target.value })}
           placeholder="Automation name"
-          className="flex-1 rounded-md border border-border-token bg-background px-2.5 py-1.5 text-sm font-medium outline-none focus:border-accent"
+          className="flex-1 rounded-lg border border-border-token bg-background px-3 py-2 text-sm font-medium outline-none transition focus:border-accent focus:ring-2 focus:ring-ring"
         />
         <button
           data-testid="automation-test-run"
           onClick={doTestRun}
           disabled={testing || saving}
-          className="flex items-center gap-1.5 rounded-md border border-border-token px-3 py-1.5 text-sm text-muted hover:bg-surface disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded-lg border border-border-token px-3 py-2 text-sm font-medium text-muted transition hover:bg-surface hover:text-foreground disabled:opacity-50"
         >
           {testing ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />} Test
         </button>
@@ -92,7 +92,7 @@ export function AutomationBuilder({
           data-testid="automation-save"
           onClick={doSave}
           disabled={!dirty || saving}
-          className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-sm font-medium text-accent-contrast shadow-sm transition hover:bg-accent-hover disabled:opacity-50"
         >
           {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save
         </button>
@@ -107,7 +107,7 @@ export function AutomationBuilder({
       </section>
 
       <section>
-        <h4 className="mb-2 text-sm font-medium">Actions</h4>
+        <h4 className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Actions</h4>
         <ActionList nodes={draft.actions} onChange={(actions) => patch({ actions })} />
       </section>
     </div>

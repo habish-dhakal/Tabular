@@ -33,27 +33,29 @@ export function ActionStep({
   const actionType: ActionType = action.type ?? "sendEmail";
   const Icon = ACTION_META[actionType].icon;
   return (
-    <div className="rounded-lg border border-border-token bg-surface" data-testid="action-step">
-      <div className="flex items-center gap-2 border-b border-border-token px-3 py-2">
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent/10 text-xs font-medium text-accent">
+    <div className="overflow-hidden rounded-xl border border-border-token bg-background shadow-xs" data-testid="action-step">
+      <div className="flex items-center gap-2 border-b border-border-token bg-surface/60 px-3 py-2">
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-xs font-semibold text-accent">
           {index + 1}
         </span>
-        <Icon size={15} className="text-accent" />
+        <Icon size={15} className="shrink-0 text-accent" />
         <select
           data-testid="action-type"
           value={actionType}
           onChange={(e) => onChange({ ...action, type: e.target.value as ActionType, config: {} })}
-          className="flex-1 rounded-md border border-border-token bg-background px-2 py-1 text-sm outline-none focus:border-accent"
+          className="flex-1 rounded-lg border border-border-token bg-background px-2 py-1 text-sm font-medium outline-none transition focus:border-accent focus:ring-2 focus:ring-ring"
         >
           {automationActionTypes.map((t) => (
             <option key={t} value={t}>{ACTION_META[t].label}</option>
           ))}
         </select>
-        <button disabled={index === 0} onClick={() => onMove(-1)} className="text-muted hover:text-foreground disabled:opacity-30"><ChevronUp size={15} /></button>
-        <button disabled={index === count - 1} onClick={() => onMove(1)} className="text-muted hover:text-foreground disabled:opacity-30"><ChevronDown size={15} /></button>
-        <button data-testid="action-remove" onClick={onRemove} className="text-muted hover:text-red-600"><Trash2 size={15} /></button>
+        <div className="flex items-center gap-0.5">
+          <button disabled={index === 0} onClick={() => onMove(-1)} className="rounded-md p-1 text-muted transition hover:bg-surface-2 hover:text-foreground disabled:opacity-30"><ChevronUp size={15} /></button>
+          <button disabled={index === count - 1} onClick={() => onMove(1)} className="rounded-md p-1 text-muted transition hover:bg-surface-2 hover:text-foreground disabled:opacity-30"><ChevronDown size={15} /></button>
+          <button data-testid="action-remove" onClick={onRemove} className="rounded-md p-1 text-muted transition hover:bg-red-50 hover:text-red-600"><Trash2 size={15} /></button>
+        </div>
       </div>
-      <div className="p-3">
+      <div className="p-3.5">
         <ActionConfig type={actionType} config={action.config} onChange={(config) => onChange({ ...action, config })} />
       </div>
     </div>

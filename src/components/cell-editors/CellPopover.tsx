@@ -62,7 +62,10 @@ export function CellPopover({
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-50 rounded-lg border border-border-token bg-background shadow-xl"
+      className={
+        "fixed z-50 rounded-xl border border-border-token bg-background shadow-xl" +
+        (pos ? " anim-pop" : "")
+      }
       style={{
         left: pos?.left ?? anchorRect.left,
         top: pos?.top,

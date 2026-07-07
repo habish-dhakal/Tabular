@@ -104,7 +104,7 @@ function AddButton({
     <button
       data-testid={testid}
       onClick={onClick}
-      className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-dashed border-border-token py-2 text-sm text-accent hover:bg-surface"
+      className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-dashed border-border-token py-2.5 text-sm font-medium text-muted transition hover:border-accent/40 hover:bg-accent-soft/50 hover:text-accent"
     >
       <Icon size={15} /> {label}
     </button>
