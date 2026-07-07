@@ -4,6 +4,7 @@ import { Loader2, Table2, Kanban, CalendarDays, LayoutGrid, Plus, Trash2 } from 
 import { TableProvider, useTable } from "@/components/table/TableProvider";
 import { Toolbar } from "@/components/table/Toolbar";
 import { Popover } from "@/components/ui/Popover";
+import { useDialog } from "@/components/ui/DialogProvider";
 import { AutomationsProvider } from "@/components/automations/AutomationsProvider";
 import { AutomationsButton } from "@/components/automations/AutomationsButton";
 import { AutomationsPanel } from "@/components/automations/AutomationsPanel";
@@ -23,6 +24,7 @@ const VIEW_META: Record<ViewType, { icon: typeof Table2; label: string }> = {
 
 function ViewBar() {
   const { views, activeView, setActiveViewId, createView, deleteView } = useTable();
+  const dialog = useDialog();
 
   return (
     <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border-token bg-surface px-2">
@@ -43,7 +45,7 @@ function ViewBar() {
             {active && views.length > 1 && (
               <span
                 role="button"
-                onClick={(e) => { e.stopPropagation(); if (confirm(`Delete view "${v.name}"?`)) deleteView(v.id); }}
+                onClick={async (e) => { e.stopPropagation(); if (await dialog.confirm({ title: "Delete view?", message: `"${v.name}" will be removed.`, confirmLabel: "Delete", danger: true })) deleteView(v.id); }}
                 className="ml-1 text-muted hover:text-red-600"
               >
                 <Trash2 size={12} />

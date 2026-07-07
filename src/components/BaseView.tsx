@@ -5,14 +5,16 @@ import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import type { TableDTO } from "@/lib/types";
 import { TableWorkspace } from "@/components/table/TableWorkspace";
+import { useDialog } from "@/components/ui/DialogProvider";
 
 export function BaseView({ baseId, tables }: { baseId: string; tables: TableDTO[] }) {
   const router = useRouter();
+  const dialog = useDialog();
   const [activeId, setActiveId] = useState(tables[0]?.id ?? null);
   const [creating, setCreating] = useState(false);
 
   async function addTable() {
-    const name = window.prompt("Name your table", "Untitled");
+    const name = await dialog.prompt({ title: "New table", label: "Name", placeholder: "Untitled", defaultValue: "Untitled", confirmLabel: "Create" });
     if (!name?.trim()) return;
     setCreating(true);
     const res = await fetch(`/api/bases/${baseId}/tables`, {

@@ -13,6 +13,7 @@ import type { FieldDTO, RecordDTO, TableBundle, TableDTO, ViewConfig, ViewDTO } 
 import type { LinkChip } from "@/components/cell-editors/LinkPicker";
 import type { FieldType, ViewType } from "@/server/db/schema";
 import { FIELD_TYPE_META } from "@/lib/fields";
+import { useDialog } from "@/components/ui/DialogProvider";
 
 interface TableCtx {
   loading: boolean;
@@ -49,6 +50,7 @@ export function useTable() {
 }
 
 export function TableProvider({ tableId, children }: { tableId: string; children: React.ReactNode }) {
+  const dialog = useDialog();
   const [loading, setLoading] = useState(true);
   const [table, setTable] = useState<TableBundle["table"] | null>(null);
   const [fields, setFields] = useState<FieldDTO[]>([]);
@@ -176,7 +178,7 @@ export function TableProvider({ tableId, children }: { tableId: string; children
         setFields((prev) => [...prev, field].sort((a, b) => a.position - b.position));
       } else {
         const { error } = await res.json().catch(() => ({ error: "Failed" }));
-        alert(error);
+        void dialog.alert({ title: "Something went wrong", message: error });
       }
     },
     [tableId]
@@ -200,7 +202,7 @@ export function TableProvider({ tableId, children }: { tableId: string; children
       }
     } else {
       const { error } = await res.json().catch(() => ({ error: "Failed" }));
-      alert(error);
+      void dialog.alert({ title: "Something went wrong", message: error });
     }
   }, [tableId]);
 
@@ -210,7 +212,7 @@ export function TableProvider({ tableId, children }: { tableId: string; children
       setFields((prev) => prev.filter((f) => f.id !== fieldId));
     } else {
       const { error } = await res.json().catch(() => ({ error: "Failed" }));
-      alert(error);
+      void dialog.alert({ title: "Something went wrong", message: error });
     }
   }, []);
 
@@ -257,7 +259,7 @@ export function TableProvider({ tableId, children }: { tableId: string; children
         });
       } else {
         const { error } = await res.json().catch(() => ({ error: "Failed" }));
-        alert(error);
+        void dialog.alert({ title: "Something went wrong", message: error });
       }
     },
     []

@@ -7,6 +7,7 @@ import {
 import { Popover } from "@/components/ui/Popover";
 import { FieldEditor } from "@/components/table/FieldEditor";
 import { useTable } from "@/components/table/TableProvider";
+import { useDialog } from "@/components/ui/DialogProvider";
 import type { FieldDTO } from "@/lib/types";
 
 export function FieldHeaderMenu({ field }: { field: FieldDTO }) {
@@ -26,6 +27,7 @@ export function FieldHeaderMenu({ field }: { field: FieldDTO }) {
 
 function MenuBody({ field, close }: { field: FieldDTO; close: () => void }) {
   const { updateConfig, config, updateField, deleteField } = useTable();
+  const dialog = useDialog();
   const [editing, setEditing] = useState(false);
 
   if (editing) {
@@ -68,8 +70,8 @@ function MenuBody({ field, close }: { field: FieldDTO; close: () => void }) {
           </button>
           <button
             className={item + " text-red-600"}
-            onClick={() => {
-              if (confirm(`Delete field "${field.name}"? This removes its data.`)) {
+            onClick={async () => {
+              if (await dialog.confirm({ title: "Delete field?", message: `"${field.name}" and all its data will be removed.`, confirmLabel: "Delete", danger: true })) {
                 deleteField(field.id);
                 close();
               }

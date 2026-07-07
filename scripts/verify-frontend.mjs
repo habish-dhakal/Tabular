@@ -295,8 +295,11 @@ async function main() {
     check("run has a step row", (await page.$$(testid("run-step"))).length >= 1);
     check("runs tab reachable", await page.$(testid("runs-tab")) !== null);
 
-    // close the panel (backdrop click; not dirty after save)
+    // close the panel (backdrop click). If the builder is dirty, the custom
+    // "Discard changes?" dialog appears — confirm it to complete the close.
     await page.mouse.click(6, 6);
+    await sleep(250);
+    await page.evaluate((s) => document.querySelector(s)?.click(), testid("dialog-confirm"));
     await sleep(300);
     check("automations panel closes", await page.$(testid("automations-panel")) === null);
 

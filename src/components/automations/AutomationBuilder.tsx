@@ -7,6 +7,7 @@ import { useAutomations } from "@/components/automations/AutomationsProvider";
 import { TriggerSection } from "@/components/automations/TriggerSection";
 import { ActionList } from "@/components/automations/ActionList";
 import { buildTree, toNested } from "@/components/automations/tree";
+import { useDialog } from "@/components/ui/DialogProvider";
 import type { ActionNode, AutomationDTO, TriggerType } from "@/lib/types";
 
 interface Draft {
@@ -36,6 +37,7 @@ export function AutomationBuilder({
 }) {
   const { records } = useTable();
   const { save, testRun } = useAutomations();
+  const dialog = useDialog();
   const [draft, setDraft] = useState<Draft>(() => toDraft(automation));
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -63,7 +65,7 @@ export function AutomationBuilder({
   async function doTestRun() {
     if (dirty && !(await doSave())) return;
     const record = records[0];
-    if (!record) { alert("Add a record to this table first to test-run."); return; }
+    if (!record) { await dialog.alert({ title: "No records to test with", message: "Add a record to this table first, then test-run the automation." }); return; }
     setTesting(true);
     await testRun(automation.id, record.id);
     setTesting(false);

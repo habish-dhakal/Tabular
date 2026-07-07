@@ -6,11 +6,11 @@ import { useAutomations } from "@/components/automations/AutomationsProvider";
 import { AutomationList } from "@/components/automations/AutomationList";
 import { AutomationBuilder } from "@/components/automations/AutomationBuilder";
 import { RunHistory } from "@/components/automations/RunHistory";
-
-const DIRTY_WARN = "You have unsaved changes. Discard them?";
+import { useDialog } from "@/components/ui/DialogProvider";
 
 export function AutomationsPanel() {
   const { open, setOpen, automations, selectedId, select, remove, loading } = useAutomations();
+  const dialog = useDialog();
   const [tab, setTab] = useState<"build" | "runs">("build");
   const [dirty, setDirty] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -19,10 +19,15 @@ export function AutomationsPanel() {
 
   const selected = automations.find((a) => a.id === selectedId) ?? null;
 
-  function guarded(action: () => void) {
-    if (dirty && !confirm(DIRTY_WARN)) return;
+  async function guarded(action: () => void | Promise<void>) {
+    if (dirty && !(await dialog.confirm({
+      title: "Discard changes?",
+      message: "You have unsaved changes to this automation. They'll be lost.",
+      confirmLabel: "Discard",
+      danger: true,
+    }))) return;
     setDirty(false);
-    action();
+    await action();
   }
   const close = () => guarded(() => setOpen(false));
   const selectAutomation = (id: string) => guarded(() => { select(id); setTab("build"); });
@@ -70,7 +75,14 @@ export function AutomationsPanel() {
                     </button>
                   ))}
                   <button
-                    onClick={() => guarded(() => { if (confirm(`Delete automation "${selected.name}"?`)) remove(selected.id); })}
+                    onClick={() => guarded(async () => {
+                      if (await dialog.confirm({
+                        title: "Delete automation?",
+                        message: `"${selected.name}" and its run history will be permanently removed.`,
+                        confirmLabel: "Delete",
+                        danger: true,
+                      })) remove(selected.id);
+                    })}
                     className="ml-auto flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted hover:text-red-600"
                   >
                     <Trash2 size={13} /> Delete

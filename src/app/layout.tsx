@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Sora, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import { DialogProvider } from "@/components/ui/DialogProvider";
 
 const sans = Sora({
   variable: "--font-sans",
@@ -28,7 +29,9 @@ export default function RootLayout({
       lang="en"
       className={`${sans.variable} ${mono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <DialogProvider>{children}</DialogProvider>
+      </body>
     </html>
   );
 }
