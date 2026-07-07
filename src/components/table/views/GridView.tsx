@@ -21,6 +21,9 @@ const DEFAULT_COL_W = 180;
 const PRIMARY_COL_W = 240;
 const ADD_COL_W = 120;
 const ROW_HEIGHTS = { short: 36, medium: 48, tall: 68 } as const;
+// Rows grow to fit wrapped multi-value cells, but never past this — beyond it the
+// cell scrolls internally so one link-heavy record can't dominate the viewport.
+const MAX_ROW_H = 160;
 const HEADER_H = 32;
 
 type Item =
@@ -97,7 +100,7 @@ export function GridView() {
             const item = items[vi.index];
             if (item.kind === "group") {
               return (
-                <div key={vi.key} className="absolute left-0 flex items-center gap-2 border-b border-border-token bg-surface/80 px-3 text-sm font-medium" style={{ top: vi.start, height: 34, width: "100%" }}>
+                <div key={vi.key} data-index={vi.index} ref={virtualizer.measureElement} className="absolute left-0 top-0 flex items-center gap-2 border-b border-border-token bg-surface/80 px-3 text-sm font-medium" style={{ transform: `translateY(${vi.start}px)`, minHeight: 34, width: "100%" }}>
                   {item.color && <span className="h-2.5 w-2.5 rounded-full" style={{ background: item.color }} />}
                   <span>{item.label}</span>
                   <span className="text-xs text-muted">{item.count}</span>
@@ -106,8 +109,8 @@ export function GridView() {
             }
             const record = item.record;
             return (
-              <div key={record.id} className="group absolute left-0 flex border-b border-border-token hover:bg-surface/60" style={{ top: vi.start, height: rowH, width: "100%" }}>
-                <div className="flex items-center justify-between border-r border-border-token px-2 text-xs text-muted" style={{ width: GUTTER_W }}>
+              <div key={record.id} data-index={vi.index} ref={virtualizer.measureElement} className="group absolute left-0 top-0 flex border-b border-border-token hover:bg-surface/60" style={{ transform: `translateY(${vi.start}px)`, minHeight: rowH, maxHeight: MAX_ROW_H, width: "100%" }}>
+                <div className="flex items-start justify-between border-r border-border-token px-2 pt-2 text-xs text-muted" style={{ width: GUTTER_W }}>
                   <span className="group-hover:hidden">{vi.index + 1}</span>
                   <div className="hidden items-center gap-1.5 group-hover:flex">
                     <button onClick={() => setExpanded(record)} data-testid="row-expand" title="Expand record" className="text-muted hover:text-accent"><Maximize2 size={12} /></button>
@@ -120,7 +123,7 @@ export function GridView() {
                   const computed = isComputed(f.type);
                   if (f.type === "checkbox") {
                     return (
-                      <div key={f.id} className="flex items-center justify-center border-r border-border-token" style={{ width: colWidth(f) }}>
+                      <div key={f.id} className="flex items-start justify-center border-r border-border-token pt-2.5" style={{ width: colWidth(f) }}>
                         <input type="checkbox" checked={!!value} onChange={(e) => commitCell(record.id, f.id, e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />
                       </div>
                     );
@@ -133,7 +136,7 @@ export function GridView() {
                           ? setViewing({ recordId: record.id, fieldId: f.id, rect: e.currentTarget.getBoundingClientRect() })
                           : !isEditing && setEditing({ recordId: record.id, fieldId: f.id, rect: e.currentTarget.getBoundingClientRect() })
                       }
-                      className={"flex items-center overflow-hidden border-r border-border-token px-2 text-sm " + (computed ? "cursor-pointer bg-surface/40 text-muted" : "cursor-text")}
+                      className={"thin-scroll flex items-start overflow-y-auto overflow-x-hidden border-r border-border-token px-2 py-1.5 text-sm " + (computed ? "cursor-pointer bg-surface/40 text-muted" : "cursor-text")}
                       style={{ width: colWidth(f) }}
                     >
                       {isEditing ? (

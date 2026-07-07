@@ -121,7 +121,7 @@ export function CellDisplay({ field, value, expanded }: { field: FieldDTO; value
       const chips = Array.isArray(value) ? (value as { id: string; label: string }[]) : [];
       if (chips.length === 0) return <span className="text-transparent">·</span>;
       return (
-        <span className={expanded ? "flex flex-wrap gap-1.5" : "flex gap-1.5 overflow-hidden"}>
+        <span className="flex flex-wrap gap-1.5">
           {chips.map((c) => (
             <span key={c.id} className={CHIP_CLS}>
               {c.label}
@@ -135,7 +135,7 @@ export function CellDisplay({ field, value, expanded }: { field: FieldDTO; value
       const vals = Array.isArray(value) ? value : [value];
       if (vals.length === 0) return <span className="text-transparent">·</span>;
       return (
-        <span className={expanded ? "flex flex-wrap gap-1.5" : "flex gap-1.5 overflow-hidden"}>
+        <span className="flex flex-wrap gap-1.5">
           {vals.map((v, i) => (
             <span key={i} className={CHIP_CLS}>
               {String(v)}
