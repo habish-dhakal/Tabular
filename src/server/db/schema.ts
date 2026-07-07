@@ -411,6 +411,7 @@ export const automationRunSteps = pgTable(
 export const workspacesRelations = relations(workspaces, ({ many, one }) => ({
   bases: many(bases),
   members: many(workspaceMembers),
+  invites: many(workspaceInvites),
   owner: one(users, { fields: [workspaces.ownerId], references: [users.id] }),
 }));
 
@@ -521,4 +522,40 @@ export const notifications = pgTable(
 export const commentsRelations = relations(comments, ({ one }) => ({
   record: one(records, { fields: [comments.recordId], references: [records.id] }),
   author: one(users, { fields: [comments.authorId], references: [users.id] }),
+}));
+
+/* ================================================================== *
+ * WORKSPACE INVITES (token-based; the id doubles as the share token)
+ * ================================================================== */
+export const workspaceInvites = pgTable(
+  "workspace_invite",
+  {
+    // The id doubles as the opaque, unguessable token embedded in the invite link.
+    id: id("inv"),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    // Role granted on accept. Never "owner" — that is singular (workspace.ownerId).
+    role: text("role").$type<WorkspaceRole>().notNull().default("editor"),
+    // Optional: pin the invite to one email address (case-insensitive match on accept).
+    email: text("email"),
+    invitedById: text("invited_by_id").references(() => users.id, { onDelete: "set null" }),
+    // Set once the invite is redeemed; a redeemed invite can't be reused.
+    acceptedById: text("accepted_by_id").references(() => users.id, { onDelete: "set null" }),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: now(),
+  },
+  (t) => [index("workspace_invite_ws_idx").on(t.workspaceId)]
+);
+
+export const workspaceInvitesRelations = relations(workspaceInvites, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [workspaceInvites.workspaceId],
+    references: [workspaces.id],
+  }),
+  invitedBy: one(users, {
+    fields: [workspaceInvites.invitedById],
+    references: [users.id],
+  }),
 }));

@@ -6,6 +6,7 @@ import {
   workspaceMembers,
   type WorkspaceRole,
 } from "@/server/db/schema";
+import { ADMIN_ROLES } from "@/server/services/member-policy";
 
 export class AccessError extends Error {
   constructor(public status: number, message: string) {
@@ -47,6 +48,16 @@ export async function assertWorkspaceAccess(
   if (!role) throw new AccessError(404, "Workspace not found");
   if (write && !WRITE_ROLES.includes(role)) {
     throw new AccessError(403, "You don't have permission to edit this");
+  }
+  return role;
+}
+
+/** Assert the user may manage this workspace's members + invites (owner/admin). */
+export async function assertWorkspaceAdminAccess(userId: string, workspaceId: string) {
+  const role = await roleInWorkspace(userId, workspaceId);
+  if (!role) throw new AccessError(404, "Workspace not found");
+  if (!ADMIN_ROLES.includes(role)) {
+    throw new AccessError(403, "Only workspace admins can manage members");
   }
   return role;
 }

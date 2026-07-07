@@ -495,6 +495,66 @@ async function main() {
   check("intruder POST comment → 404", (await cmtIntruder.req("POST", `/api/records/${recCM.json.id}/comments`, { body: "x", mentions: [] })).status === 404);
   check("intruder GET members → 404", (await cmtIntruder.req("GET", `/api/tables/${CM.tableId}/members`)).status === 404);
 
+  /* ================================================================ *
+   * MEMBER MANAGEMENT: invites (token) + roles + cross-user delivery
+   * ================================================================ */
+  const mlist0 = await s.req("GET", `/api/workspaces/${workspaceId}/members`);
+  check("members list: owner only to start", mlist0.status === 200 && mlist0.json.length === 1, JSON.stringify(mlist0.json));
+  check("owner row flagged isOwner + role owner", mlist0.json[0].isOwner === true && mlist0.json[0].role === "owner");
+
+  const inv = await s.req("POST", `/api/workspaces/${workspaceId}/invites`, { role: "editor" });
+  check("create invite", inv.status === 200 && inv.json.id?.startsWith("inv_"), JSON.stringify(inv.json));
+  check("invite state pending", inv.json.state === "pending" && inv.json.role === "editor");
+  check("invite grants owner rejected", (await s.req("POST", `/api/workspaces/${workspaceId}/invites`, { role: "owner" })).status === 400);
+  const token = inv.json.id;
+
+  /* non-members can't manage invites/members */
+  const nonMember = await login("verify-invite-intruder@tabular.dev");
+  check("non-member list invites → 404", (await nonMember.req("GET", `/api/workspaces/${workspaceId}/invites`)).status === 404);
+  check("non-member create invite → 404", (await nonMember.req("POST", `/api/workspaces/${workspaceId}/invites`, { role: "editor" })).status === 404);
+  check("non-member list members → 404", (await nonMember.req("GET", `/api/workspaces/${workspaceId}/members`)).status === 404);
+
+  /* invitee previews + accepts the token */
+  const invitee = await login("verify-invitee@tabular.dev");
+  const preview = await invitee.req("GET", `/api/invites/${token}`);
+  check("invitee previews invite", preview.status === 200 && preview.json.role === "editor" && preview.json.state === "pending", JSON.stringify(preview.json));
+  const accept = await invitee.req("POST", `/api/invites/${token}/accept`);
+  check("invitee accepts invite", accept.status === 200 && accept.json.alreadyMember === false, JSON.stringify(accept.json));
+  check("re-accepting used invite → 410", (await invitee.req("POST", `/api/invites/${token}/accept`)).status === 410);
+
+  const mlist1 = await s.req("GET", `/api/workspaces/${workspaceId}/members`);
+  check("members list now has 2", mlist1.status === 200 && mlist1.json.length === 2, JSON.stringify(mlist1.json));
+  const inviteeRow = mlist1.json.find((m) => m.email === "verify-invitee@tabular.dev");
+  check("invitee joined as editor", inviteeRow?.role === "editor" && inviteeRow?.isOwner === false);
+  const inviteeId = inviteeRow.id;
+  check("invitee now has workspace access", (await invitee.req("GET", `/api/workspaces/${workspaceId}/members`)).status === 200);
+
+  /* CROSS-USER MENTION DELIVERY (the previously-untested path) */
+  const cxc = await s.req("POST", `/api/records/${recCM.json.id}/comments`, { body: "ping @editor", mentions: [inviteeId] });
+  check("owner mentions the invitee", cxc.status === 200 && JSON.stringify(cxc.json.mentions) === JSON.stringify([inviteeId]), JSON.stringify(cxc.json?.mentions));
+  const invNotif = await invitee.req("GET", "/api/notifications");
+  check("cross-user mention delivered to invitee", invNotif.status === 200 && invNotif.json.unread >= 1, JSON.stringify(invNotif.json));
+  check("delivered notification is a mention on the record", invNotif.json.items.some((n) => n.type === "mention" && n.recordId === recCM.json.id && n.body === "ping @editor"));
+
+  /* role management + guards */
+  check("owner demotes invitee to viewer", (await s.req("PATCH", `/api/workspaces/${workspaceId}/members/${inviteeId}`, { role: "viewer" })).status === 200);
+  check("promote to owner rejected", (await s.req("PATCH", `/api/workspaces/${workspaceId}/members/${inviteeId}`, { role: "owner" })).status === 400);
+  check("changing owner's own role rejected", (await s.req("PATCH", `/api/workspaces/${workspaceId}/members/${me}`, { role: "editor" })).status === 400);
+  check("removing the owner rejected", (await s.req("DELETE", `/api/workspaces/${workspaceId}/members/${me}`)).status === 400);
+  check("viewer cannot manage members", (await invitee.req("PATCH", `/api/workspaces/${workspaceId}/members/${me}`, { role: "viewer" })).status === 403);
+
+  /* remove the member */
+  check("owner removes invitee", (await s.req("DELETE", `/api/workspaces/${workspaceId}/members/${inviteeId}`)).status === 200);
+  check("members list back to 1", (await s.req("GET", `/api/workspaces/${workspaceId}/members`)).json.length === 1);
+  check("removed member loses workspace access", (await invitee.req("GET", `/api/workspaces/${workspaceId}/members`)).status === 404);
+
+  /* revoke + email-pin */
+  const inv2 = await s.req("POST", `/api/workspaces/${workspaceId}/invites`, { role: "editor" });
+  check("revoke invite", (await s.req("DELETE", `/api/workspaces/${workspaceId}/invites/${inv2.json.id}`)).status === 200);
+  check("accepting revoked invite → 404", (await invitee.req("POST", `/api/invites/${inv2.json.id}/accept`)).status === 404);
+  const invPinned = await s.req("POST", `/api/workspaces/${workspaceId}/invites`, { role: "editor", email: "someone-else@tabular.dev" });
+  check("email-pinned invite rejects wrong user", (await invitee.req("POST", `/api/invites/${invPinned.json.id}/accept`)).status === 403);
+
   /* ---- tenant isolation ---- */
   const intruder = await login("verify-intruder@tabular.dev");
   check("intruder GET base tables → 404", (await intruder.req("GET", `/api/bases/${baseId}/tables`)).status === 404);

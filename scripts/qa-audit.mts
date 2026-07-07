@@ -8,6 +8,12 @@ import { evaluateFormula, validateFormula } from "@/lib/formula";
 import { coerceCellValue } from "@/lib/fields";
 import { evaluateCondition } from "@/lib/query";
 import { devLoginAllowed } from "@/server/auth-flags";
+import {
+  canManageMembers,
+  inviteEmailMatches,
+  inviteState,
+  isInvitableRole,
+} from "@/server/services/member-policy";
 import type { FieldDTO, FilterOp } from "@/lib/types";
 import type { FieldType } from "@/server/db/schema";
 
@@ -225,6 +231,40 @@ eq("dev login on in development", devLoginAllowed({ NODE_ENV: "development" } as
 eq("dev login on in test", devLoginAllowed({ NODE_ENV: "test" } as NodeJS.ProcessEnv), true);
 eq("dev login OFF in production", devLoginAllowed({ NODE_ENV: "production" } as NodeJS.ProcessEnv), false);
 eq("dev login opt-in in production", devLoginAllowed({ NODE_ENV: "production", ALLOW_DEV_LOGIN: "1" } as NodeJS.ProcessEnv), true);
+
+/* ============================ MEMBER / INVITE POLICY ============================ */
+console.log("— Members: manage permission —");
+eq("owner can manage members", canManageMembers("owner"), true);
+eq("admin can manage members", canManageMembers("admin"), true);
+eq("editor cannot manage members", canManageMembers("editor"), false);
+eq("commenter cannot manage members", canManageMembers("commenter"), false);
+eq("viewer cannot manage members", canManageMembers("viewer"), false);
+eq("null role cannot manage members", canManageMembers(null), false);
+
+console.log("— Invites: grantable roles —");
+eq("admin is invitable", isInvitableRole("admin"), true);
+eq("editor is invitable", isInvitableRole("editor"), true);
+eq("commenter is invitable", isInvitableRole("commenter"), true);
+eq("viewer is invitable", isInvitableRole("viewer"), true);
+eq("owner is NOT invitable", isInvitableRole("owner"), false);
+eq("garbage role is NOT invitable", isInvitableRole("superuser"), false);
+
+console.log("— Invites: email pin match —");
+eq("unpinned invite matches anyone", inviteEmailMatches(null, "a@b.com"), true);
+eq("pinned invite matches same email", inviteEmailMatches("A@B.com", "a@b.com"), true);
+eq("pinned invite trims + case-folds", inviteEmailMatches(" a@b.com ", "A@B.COM"), true);
+eq("pinned invite rejects other email", inviteEmailMatches("a@b.com", "c@d.com"), false);
+eq("pinned invite rejects missing user email", inviteEmailMatches("a@b.com", null), false);
+
+console.log("— Invites: lifecycle state —");
+const past = new Date("2020-01-01T00:00:00Z");
+const future = new Date("2999-01-01T00:00:00Z");
+const nowRef = new Date("2026-07-06T00:00:00Z");
+eq("pending when unused + not expired", inviteState({ acceptedAt: null, expiresAt: future }, nowRef), "pending");
+eq("pending when no expiry set", inviteState({ acceptedAt: null, expiresAt: null }, nowRef), "pending");
+eq("accepted once redeemed", inviteState({ acceptedAt: nowRef, expiresAt: future }, nowRef), "accepted");
+eq("expired past its expiry", inviteState({ acceptedAt: null, expiresAt: past }, nowRef), "expired");
+eq("accepted beats expired", inviteState({ acceptedAt: nowRef, expiresAt: past }, nowRef), "accepted");
 
 /* ============================ REPORT ============================ */
 console.log(`\n${pass} passed, ${fails.length} failed`);
