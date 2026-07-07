@@ -460,6 +460,78 @@ async function main() {
     (await autIntruder.req("POST", `/api/tables/${A.tableId}/automations`, { name: "x", triggerType: "recordCreated", actions: [] })).status === 404);
 
   /* ================================================================ *
+   * ADVANCED LOGIC: loops (repeating groups) + conditional groups
+   * ================================================================ */
+  const LSRC = await mkTable("Loop Src", [{ name: "Item", type: "singleLineText" }]);
+  const LOUT = await mkTable("Loop Out", [{ name: "Val", type: "singleLineText" }]);
+  const LOUT2 = await mkTable("Loop Out 2", [{ name: "Val", type: "singleLineText" }]);
+  const LTRIG = await mkTable("Loop Trig", [{ name: "Go", type: "singleLineText" }]);
+  for (const v of ["A", "B", "C"]) {
+    await s.req("POST", `/api/tables/${LSRC.tableId}/records`, { cells: { [LSRC.fids.Item]: v } });
+  }
+  const trigRec = await s.req("POST", `/api/tables/${LTRIG.tableId}/records`, { cells: {} });
+  // New tables seed a few blank rows, so scope the loop source to real items.
+  const srcCond = [{ id: "src", fieldId: LSRC.fids.Item, op: "isNotEmpty" }];
+  const countOut = async (t) => (await s.req("GET", `/api/tables/${t}/records`)).json.records;
+  const valsOf = (recs, t) => recs.map((r) => r.cells[t.fids.Val]);
+
+  // Loop over the 3 non-blank Loop-Src records; create one Loop-Out row per
+  // item, with the current item's field interpolated via {{item.Item}}.
+  const loopAut = await s.req("POST", `/api/tables/${LTRIG.tableId}/automations`, {
+    name: "Fan out",
+    triggerType: "recordCreated",
+    triggerConfig: {},
+    actions: [
+      {
+        kind: "loop",
+        config: { source: { kind: "query", tableId: LSRC.tableId, conjunction: "and", conditions: srcCond } },
+        actions: [{ type: "createRecord", config: { tableId: LOUT.tableId, cells: { Val: "{{item.Item}}" } } }],
+      },
+    ],
+  });
+  check("create looped automation", loopAut.status === 200 && loopAut.json.id, loopAut.json?.error);
+  const loopActs = loopAut.json.actions ?? [];
+  check("loop node + child persisted (flat=2)", loopActs.length === 2, JSON.stringify(loopActs.map((a) => a.kind)));
+  const loopNode = loopActs.find((a) => a.kind === "loop");
+  const loopChild = loopActs.find((a) => a.kind === "action");
+  check("loop node has null type, child parented to it", !!loopNode && loopNode.type == null && loopChild?.parentId === loopNode.id);
+
+  const loutBefore = (await countOut(LOUT.tableId)).length;
+  const loopRun = await s.req("POST", `/api/automations/${loopAut.json.id}/test`, { recordId: trigRec.json.id });
+  check("loop run success", loopRun.status === 200 && loopRun.json.status === "success", JSON.stringify(loopRun.json));
+  const loutAfter = await countOut(LOUT.tableId);
+  check("loop created one row per item (+3)", loutAfter.length - loutBefore === 3, `delta ${loutAfter.length - loutBefore}`);
+  check("{{item.*}} interpolated per iteration", ["A", "B", "C"].every((v) => valsOf(loutAfter, LOUT).includes(v)), JSON.stringify(valsOf(loutAfter, LOUT)));
+
+  // Loop + conditional child: only act on the item whose value is "B".
+  const condAut = await s.req("POST", `/api/tables/${LTRIG.tableId}/automations`, {
+    name: "Fan out if B",
+    triggerType: "recordCreated",
+    triggerConfig: {},
+    actions: [
+      {
+        kind: "loop",
+        config: { source: { kind: "query", tableId: LSRC.tableId, conditions: srcCond } },
+        actions: [
+          {
+            kind: "conditional",
+            config: { conjunction: "and", conditions: [{ id: "c1", fieldId: LSRC.fids.Item, op: "is", value: "B" }] },
+            actions: [{ type: "createRecord", config: { tableId: LOUT2.tableId, cells: { Val: "{{item.Item}}" } } }],
+          },
+        ],
+      },
+    ],
+  });
+  check("create loop+conditional automation", condAut.status === 200 && condAut.json.id, condAut.json?.error);
+  check("nested tree persisted (flat=3)", (condAut.json.actions?.length ?? 0) === 3, JSON.stringify(condAut.json.actions?.map((a) => a.kind)));
+  const lout2Before = (await countOut(LOUT2.tableId)).length;
+  const condRun = await s.req("POST", `/api/automations/${condAut.json.id}/test`, { recordId: trigRec.json.id });
+  check("loop+conditional run success", condRun.status === 200 && condRun.json.status === "success", JSON.stringify(condRun.json));
+  const lout2After = await countOut(LOUT2.tableId);
+  const newVals = valsOf(lout2After, LOUT2).filter((v) => v === "B");
+  check("conditional gates loop body (only B)", lout2After.length - lout2Before === 1 && newVals.length === 1, `delta ${lout2After.length - lout2Before}, B=${newVals.length}`);
+
+  /* ================================================================ *
    * COMMENTS + MENTIONS + NOTIFICATIONS
    * (cross-user mention *delivery* needs member management — not built
    *  yet; here we cover mention filtering, self-exclude, CRUD, isolation) *

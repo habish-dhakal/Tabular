@@ -8,11 +8,22 @@ import type { FieldDTO } from "@/lib/types";
  * `{Field}`). We map name→id at run time against the table's fields and pull
  * the stored cell value. Trade-off (v1): renaming a field breaks its tokens.
  *
+ * Inside a repeating group (loop), the current iteration's record is available
+ * via `{{item.Field Name}}` (alias `{{current item.Field Name}}`), resolved
+ * against the *looped* table's fields — not the trigger table's.
+ *
  * - multi-value (array) cells → comma-joined
  * - null / undefined / unknown field → "" (unknown field also warns)
  * - only *stored* values resolve; computed fields aren't in `cells`.
  */
 const TOKEN_RE = /\{\{\s*([^}]+?)\s*\}\}/g;
+const ITEM_PREFIX_RE = /^(?:item|current item)\.(.+)$/i;
+
+/** The current loop item exposed to `{{item.*}}` tokens. */
+export interface ItemContext {
+  fields: FieldDTO[];
+  cells: Record<string, unknown>;
+}
 
 function stringifyCell(value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -23,15 +34,32 @@ function stringifyCell(value: unknown): string {
 
 export type Interpolator = <T>(value: T) => T;
 
-/** Build an interpolator bound to a set of fields + a record's cells. */
+/**
+ * Build an interpolator bound to the trigger record's fields + cells, and
+ * optionally a loop `item` context for `{{item.*}}` tokens.
+ */
 export function makeInterpolator(
   fields: FieldDTO[],
-  cells: Record<string, unknown>
+  cells: Record<string, unknown>,
+  item?: ItemContext
 ): Interpolator {
   const idByName = new Map(fields.map((f) => [f.name.toLowerCase(), f.id]));
+  const itemIdByName = item
+    ? new Map(item.fields.map((f) => [f.name.toLowerCase(), f.id]))
+    : null;
 
   const interpolateString = (str: string): string =>
     str.replace(TOKEN_RE, (_match, rawName: string) => {
+      const itemMatch = rawName.match(ITEM_PREFIX_RE);
+      if (itemMatch) {
+        if (!itemIdByName || !item) return ""; // {{item.*}} outside a loop
+        const fieldId = itemIdByName.get(itemMatch[1].trim().toLowerCase());
+        if (!fieldId) {
+          console.warn(`[automations] unknown item token field "${itemMatch[1]}"`);
+          return "";
+        }
+        return stringifyCell(item.cells[fieldId]);
+      }
       const fieldId = idByName.get(rawName.toLowerCase());
       if (!fieldId) {
         console.warn(`[automations] unknown token field "${rawName}"`);

@@ -5,13 +5,21 @@ import {
   automationRuns,
   automationRunSteps,
   automations,
+  type AutomationActionKind,
   type AutomationActionType,
   type AutomationTriggerType,
 } from "@/server/db/schema";
 
+/**
+ * A saved action node. Leaf steps set `type` + `config`; "loop"/"conditional"
+ * group nodes omit `type`, carry their source/conditions in `config`, and nest
+ * child steps in `actions`.
+ */
 export interface ActionInput {
-  type: AutomationActionType;
+  kind?: AutomationActionKind;
+  type?: AutomationActionType | null;
   config: Record<string, unknown>;
+  actions?: ActionInput[];
 }
 
 export interface CreateAutomationInput {
@@ -55,6 +63,33 @@ export async function tableIdForAutomation(automationId: string): Promise<string
   return row[0]?.tableId ?? null;
 }
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** Depth-first insert of an action tree; each node's children get its id as parentId. */
+async function insertActions(
+  tx: Tx,
+  automationId: string,
+  nodes: ActionInput[],
+  parentId: string | null
+) {
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    const kind = n.kind ?? "action";
+    const [row] = await tx
+      .insert(automationActions)
+      .values({
+        automationId,
+        parentId,
+        kind,
+        type: kind === "action" ? n.type ?? null : null,
+        position: i,
+        config: n.config ?? {},
+      })
+      .returning();
+    if (n.actions?.length) await insertActions(tx, automationId, n.actions, row.id);
+  }
+}
+
 export async function createAutomation(
   tableId: string,
   userId: string,
@@ -73,16 +108,7 @@ export async function createAutomation(
       })
       .returning();
 
-    if (input.actions.length) {
-      await tx.insert(automationActions).values(
-        input.actions.map((a, i) => ({
-          automationId: automation.id,
-          type: a.type,
-          position: i,
-          config: a.config,
-        }))
-      );
-    }
+    await insertActions(tx, automation.id, input.actions, null);
     return automation.id;
   });
 }
@@ -97,19 +123,10 @@ export async function updateAutomation(automationId: string, input: UpdateAutoma
 
     await tx.update(automations).set(patch).where(eq(automations.id, automationId));
 
-    // Replace the whole action list when provided (builder saves the full set).
+    // Replace the whole action tree when provided (builder saves the full set).
     if (input.actions) {
       await tx.delete(automationActions).where(eq(automationActions.automationId, automationId));
-      if (input.actions.length) {
-        await tx.insert(automationActions).values(
-          input.actions.map((a, i) => ({
-            automationId,
-            type: a.type,
-            position: i,
-            config: a.config,
-          }))
-        );
-      }
+      await insertActions(tx, automationId, input.actions, null);
     }
   });
 }

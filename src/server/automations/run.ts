@@ -6,11 +6,21 @@ import {
   automationRunSteps,
   fields as fieldsTable,
 } from "@/server/db/schema";
-import type { FieldDTO } from "@/lib/types";
+import type { FieldDTO, FilterCondition } from "@/lib/types";
+import { evaluateCondition } from "@/lib/query";
 import { resolveSenders, type Senders } from "@/server/integrations/senders";
 import { runWithAutomationContext } from "./context";
-import { makeInterpolator } from "./interpolate";
+import { makeInterpolator, type ItemContext } from "./interpolate";
 import { executors, type ExecutorContext } from "./executors";
+import {
+  buildActionTree,
+  resolveLoopItems,
+  MAX_GROUP_DEPTH,
+  MAX_RUN_STEPS,
+  type ActionNode,
+  type FlatAction,
+  type LoopSource,
+} from "./loop";
 import type { ChangeEvent } from "./emit";
 
 /** Minimal automation shape `runAutomation` needs. */
@@ -26,13 +36,35 @@ function eventCells(event: ChangeEvent): Record<string, unknown> {
   return event.after;
 }
 
+/** Thrown to unwind the recursion when a step fails (fail-fast). */
+class StepFailure extends Error {}
+
+/** Evaluate a conditional group's `{ conjunction, conditions }` against a record. */
+function conditionsMatch(
+  config: Record<string, unknown>,
+  fields: FieldDTO[],
+  cells: Record<string, unknown>
+): boolean {
+  const conditions = (config.conditions as FilterCondition[]) ?? [];
+  if (conditions.length === 0) return true;
+  const byId = new Map(fields.map((f) => [f.id, f]));
+  const results = conditions.map((c) => {
+    const field = byId.get(c.fieldId);
+    if (!field) return false;
+    return evaluateCondition(field, cells[c.fieldId], c.op, c.value);
+  });
+  return (config.conjunction ?? "and") === "or"
+    ? results.some(Boolean)
+    : results.every(Boolean);
+}
+
 /**
- * Execute an automation's action steps for a change event and persist a run +
+ * Execute an automation's action tree for a change event and persist a run +
  * per-step log. Shared by the worker and the `/test` route.
  *
- * Runs the whole step sequence inside an automation context so any record
- * mutations triggered by `createRecord`/`updateRecord` actions carry the
- * loop-guard depth + provenance on the events they emit.
+ * The tree supports leaf action steps plus "loop" (repeating group) and
+ * "conditional" group nodes. Everything runs inside an automation context so
+ * downstream record mutations carry the loop-guard depth + provenance.
  */
 export async function runAutomation(
   automation: RunnableAutomation,
@@ -52,58 +84,83 @@ export async function runAutomation(
     })
     .returning();
 
-  const actions = await db.query.automationActions.findMany({
+  const actionRows = (await db.query.automationActions.findMany({
     where: eq(automationActions.automationId, automation.id),
     orderBy: asc(automationActions.position),
-  });
+  })) as unknown as FlatAction[];
+  const tree = buildActionTree(actionRows);
 
   // Order by position so token name→id resolution is deterministic (matches the
   // grid's field order) even when two fields share a name — later wins.
-  const tableFields = (await db.query.fields.findMany({
+  const triggerFields = (await db.query.fields.findMany({
     where: eq(fieldsTable.tableId, automation.tableId),
     orderBy: asc(fieldsTable.position),
   })) as unknown as FieldDTO[];
-  const interpolate = makeInterpolator(tableFields, eventCells(event));
+  const triggerCells = eventCells(event);
 
   const ctx: ExecutorContext = { senders, actingUserId: automation.createdBy };
 
   let runStatus: "success" | "error" = "success";
   let runError: string | null = null;
+  let stepCount = 0;
+
+  const runNodes = async (nodes: ActionNode[], item: ItemContext | undefined, depth: number) => {
+    // The record conditions/tokens resolve against: the loop item if inside a
+    // loop, otherwise the trigger record.
+    const curFields = item?.fields ?? triggerFields;
+    const curCells = item?.cells ?? triggerCells;
+    const interpolate = makeInterpolator(triggerFields, triggerCells, item);
+
+    for (const node of nodes) {
+      if (node.kind === "loop") {
+        if (depth >= MAX_GROUP_DEPTH) throw new StepFailure(`loop nesting exceeds ${MAX_GROUP_DEPTH}`);
+        const source = interpolate(node.config).source as LoopSource | undefined;
+        if (!source) throw new StepFailure("loop is missing a source");
+        const { items, fields } = await resolveLoopItems(source, triggerFields, triggerCells);
+        for (const rec of items) {
+          await runNodes(node.children, { fields, cells: rec.cells }, depth + 1);
+        }
+        continue;
+      }
+
+      if (node.kind === "conditional") {
+        const cfg = interpolate(node.config) as Record<string, unknown>;
+        if (conditionsMatch(cfg, curFields, curCells)) {
+          await runNodes(node.children, item, depth + 1);
+        }
+        continue;
+      }
+
+      // Leaf action.
+      if (++stepCount > MAX_RUN_STEPS) throw new StepFailure(`run exceeds ${MAX_RUN_STEPS} steps`);
+      if (!node.type || !executors[node.type]) throw new StepFailure(`unknown action type "${node.type}"`);
+      const actionType = node.type;
+      const input = interpolate(node.config) as Record<string, unknown>;
+      const position = stepCount;
+      try {
+        const output = await executors[actionType](input, ctx);
+        await db.insert(automationRunSteps).values({
+          runId: run.id, actionId: node.id, position, type: actionType, status: "success", input, output, finishedAt: new Date(),
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        await db.insert(automationRunSteps).values({
+          runId: run.id, actionId: node.id, position, type: actionType, status: "error", input, error: message, finishedAt: new Date(),
+        });
+        runError = message;
+        throw new StepFailure(message);
+      }
+    }
+  };
 
   await runWithAutomationContext(
     { depth: event.depth, sourceRunId: run.id, automationId: automation.id },
     async () => {
-      for (const action of actions) {
-        const input = interpolate(action.config) as Record<string, unknown>;
-        const executor = executors[action.type];
-        try {
-          const output = await executor(input, ctx);
-          await db.insert(automationRunSteps).values({
-            runId: run.id,
-            actionId: action.id,
-            position: action.position,
-            type: action.type,
-            status: "success",
-            input,
-            output,
-            finishedAt: new Date(),
-          });
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          await db.insert(automationRunSteps).values({
-            runId: run.id,
-            actionId: action.id,
-            position: action.position,
-            type: action.type,
-            status: "error",
-            input,
-            error: message,
-            finishedAt: new Date(),
-          });
-          runStatus = "error";
-          runError = message;
-          break; // fail-fast
-        }
+      try {
+        await runNodes(tree, undefined, 0);
+      } catch (err) {
+        runStatus = "error";
+        if (!runError) runError = err instanceof Error ? err.message : String(err);
       }
     }
   );

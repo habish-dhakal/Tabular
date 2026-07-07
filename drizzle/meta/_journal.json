@@ -29,6 +29,13 @@
       "when": 1783325191692,
       "tag": "0003_lonely_vin_gonzales",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1783397886359,
+      "tag": "0004_loud_valkyrie",
+      "breakpoints": true
     }
   ]
 }

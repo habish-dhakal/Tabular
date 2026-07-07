@@ -7,14 +7,24 @@ import {
   tableIdForAutomation,
   updateAutomation,
 } from "@/server/services/automations";
-import { automationActionTypes, automationTriggerTypes } from "@/server/db/schema";
+import {
+  automationActionKinds,
+  automationActionTypes,
+  automationTriggerTypes,
+} from "@/server/db/schema";
+import type { ActionInput } from "@/server/services/automations";
 
 type Params = { params: Promise<{ automationId: string }> };
 
-const actionSchema = z.object({
-  type: z.enum(automationActionTypes),
-  config: z.record(z.string(), z.unknown()).default({}),
-});
+// Recursive: "loop"/"conditional" nodes nest child steps in `actions`.
+const actionSchema: z.ZodType<ActionInput> = z.lazy(() =>
+  z.object({
+    kind: z.enum(automationActionKinds).optional(),
+    type: z.enum(automationActionTypes).nullish(),
+    config: z.record(z.string(), z.unknown()).default({}),
+    actions: z.array(actionSchema).optional(),
+  })
+);
 
 const patchSchema = z.object({
   name: z.string().min(1).max(255).optional(),

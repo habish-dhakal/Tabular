@@ -1,5 +1,6 @@
 import { relations } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   boolean,
   doublePrecision,
   index,
@@ -303,6 +304,14 @@ export const automationActionTypes = [
 ] as const;
 export type AutomationActionType = (typeof automationActionTypes)[number];
 
+/**
+ * An action node's kind. "action" = a leaf executor step (has `type` + `config`).
+ * "loop"/"conditional" = group nodes (no executor `type`; `config` carries the
+ * loop source / conditions) whose child nodes reference it via `parentId`.
+ */
+export const automationActionKinds = ["action", "loop", "conditional"] as const;
+export type AutomationActionKind = (typeof automationActionKinds)[number];
+
 export const automationRunStatus = ["running", "success", "error", "skipped"] as const;
 export type AutomationRunStatus = (typeof automationRunStatus)[number];
 
@@ -347,7 +356,15 @@ export const automationActions = pgTable(
     automationId: text("automation_id")
       .notNull()
       .references(() => automations.id, { onDelete: "cascade" }),
-    type: text("type").$type<AutomationActionType>().notNull(),
+    kind: text("kind").$type<AutomationActionKind>().notNull().default("action"),
+    // Null for "loop"/"conditional" group nodes; set for "action" leaves.
+    type: text("type").$type<AutomationActionType>(),
+    // Parent group node (loop/conditional). Null = top-level. Self-cascade so
+    // deleting a group removes its subtree.
+    parentId: text("parent_id").references((): AnyPgColumn => automationActions.id, {
+      onDelete: "cascade",
+    }),
+    // Ordering among siblings sharing the same parent.
     position: doublePrecision("position").notNull().default(0),
     config: jsonb("config").$type<Record<string, unknown>>().notNull().default({}),
     createdAt: now(),
@@ -355,6 +372,7 @@ export const automationActions = pgTable(
   (t) => [
     index("automation_action_aut_idx").on(t.automationId),
     index("automation_action_aut_pos_idx").on(t.automationId, t.position),
+    index("automation_action_parent_idx").on(t.parentId),
   ]
 );
 
