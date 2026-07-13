@@ -38,6 +38,12 @@ make pre-commit
 `make pre-commit` is the local gate before committing a phase. Backend and
 frontend verification expect the app to be running on `http://localhost:3100`.
 
+## Canonical Plan
+
+Follow [the phase-by-phase implementation plan](phase-by-phase-implementation-plan.md)
+before starting phase work. That plan is the source of truth for branch names,
+phase boundaries, required tests, and coding rules.
+
 ## TDD Loop
 
 1. Write the smallest failing test that proves the behavior.
@@ -56,6 +62,16 @@ production experience will review the code for clarity, service ownership,
 security posture, rollback safety, and future maintenance. Keep behavior boring
 in the best possible way: centralized where it must be consistent, small where
 it can stay local, and tested at the lowest useful level before larger suites.
+
+Use existing local services, framework APIs, and proven helpers before adding
+custom code. Do not write a 50-line custom implementation when 2-5 clear lines
+using the existing stack will do. API routes stay thin, services own behavior,
+UI components delegate business rules, and DB writes go through service-owned
+validation and permission checks.
+
+Shared concepts must have one implementation path. Values, permissions, imports,
+forms, automations, views, and attachments must not grow duplicate logic across
+API routes, UI components, scripts, and background workers.
 
 ## Review Standard
 
