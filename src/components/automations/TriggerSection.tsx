@@ -2,6 +2,7 @@
 
 import { useTable } from "@/components/table/TableProvider";
 import { ConditionBuilder, type ConditionValue } from "@/components/automations/ConditionBuilder";
+import { ScheduleBuilder } from "@/components/automations/ScheduleBuilder";
 import { automationTriggerTypes } from "@/server/db/schema";
 import type { FilterCondition, TriggerType } from "@/lib/types";
 
@@ -105,22 +106,7 @@ export function TriggerSection({
         />
       )}
 
-      {type === "scheduled" && (
-        <div className="space-y-2">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Cron expression</label>
-            <input
-              value={String(config.cron ?? "")}
-              onChange={(e) => setConfig({ ...config, cron: e.target.value })}
-              placeholder="0 9 * * 1"
-              className={inputCls}
-            />
-          </div>
-          <p className="rounded-md bg-amber-500/10 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-400">
-            Scheduled triggers are saved but not executed in this version.
-          </p>
-        </div>
-      )}
+      {type === "scheduled" && <ScheduleBuilder config={config} onChange={setConfig} />}
 
       {(type === "recordCreated" || type === "recordDeleted") && (
         <p className="text-xs text-muted">

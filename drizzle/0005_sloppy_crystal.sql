@@ -1,0 +1,1 @@
+ALTER TABLE "automation" ADD COLUMN "last_scheduled_run_at" timestamp with time zone;

@@ -7,6 +7,8 @@ import { evaluateCondition } from "@/lib/query";
 import { getConnection, AUTOMATION_QUEUE_NAME } from "@/server/automations/queue";
 import { MAX_AUTOMATION_DEPTH } from "@/server/automations/context";
 import { runAutomation } from "@/server/automations/run";
+import { scheduleIsDue } from "@/server/automations/schedule-due";
+import type { Schedule } from "@/server/automations/schedule";
 import type { ChangeEvent } from "@/server/automations/emit";
 
 type AutomationRow = typeof automations.$inferSelect;
@@ -70,7 +72,7 @@ function triggerMatches(
     }
 
     case "scheduled":
-      return false; // schema-only in v1
+      return false; // fired by the cron runner (tickScheduled), not the event path
 
     default:
       return false;
@@ -128,10 +130,46 @@ worker.on("failed", (job, err) => {
   console.error(`[worker] job ${job?.id} failed:`, err);
 });
 
+/* -------- cron runner: fire scheduled automations when due -------- */
+const SCHED_TICK_MS = Number(process.env.SCHED_TICK_MS) || 60_000;
+let ticking = false;
+
+async function tickScheduled(): Promise<void> {
+  if (ticking) return; // ticks never overlap
+  ticking = true;
+  try {
+    const now = new Date();
+    const rows = await db.query.automations.findMany({
+      where: and(eq(automations.triggerType, "scheduled"), eq(automations.enabled, true)),
+    });
+    for (const a of rows) {
+      const spec = (a.triggerConfig ?? {}) as unknown as Schedule;
+      if (!spec.frequency) continue;
+      const since = a.lastScheduledRunAt ?? a.createdAt;
+      if (!scheduleIsDue(spec, since, now)) continue;
+      // Claim the slot before running so a slow run can't double-fire next tick.
+      await db.update(automations).set({ lastScheduledRunAt: now }).where(eq(automations.id, a.id));
+      try {
+        await runAutomation(a, { kind: "scheduled", tableId: a.tableId, recordId: null, after: {}, depth: 0 });
+      } catch (err) {
+        console.error(`[worker] scheduled automation ${a.id} failed:`, err);
+      }
+    }
+  } catch (err) {
+    console.error("[worker] scheduled tick failed:", err);
+  } finally {
+    ticking = false;
+  }
+}
+
+const schedTimer = setInterval(() => void tickScheduled(), SCHED_TICK_MS);
+void tickScheduled(); // catch up shortly after boot
+
 console.log("[worker] ready");
 
 async function shutdown(signal: string) {
   console.log(`[worker] ${signal} received, closing…`);
+  clearInterval(schedTimer);
   await worker.close();
   await connection!.quit();
   process.exit(0);

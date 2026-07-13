@@ -326,7 +326,7 @@ export type AutomationStepStatus = (typeof automationStepStatus)[number];
  *  recordMatchesCondition: { conjunction: "and"|"or", conditions: FilterCondition[] }
  *  recordEntersCondition:  { conjunction: "and"|"or", conditions: FilterCondition[] }
  *  recordDeleted:          {}
- *  scheduled:              { cron: string, timezone?: string }
+ *  scheduled:              { frequency, minute?, hour?, weekday?, day?, timezone? } (see schedule.ts)
  * Action `config` string fields may contain {{Field Name}} interpolation tokens.
  */
 export const automations = pgTable(
@@ -340,6 +340,9 @@ export const automations = pgTable(
     enabled: boolean("enabled").notNull().default(true),
     triggerType: text("trigger_type").$type<AutomationTriggerType>().notNull(),
     triggerConfig: jsonb("trigger_config").$type<Record<string, unknown>>().notNull().default({}),
+    // Last time the cron runner fired this (scheduled triggers only); drives
+    // due-detection + dedupe across worker ticks/restarts.
+    lastScheduledRunAt: timestamp("last_scheduled_run_at", { withTimezone: true }),
     createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: now(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

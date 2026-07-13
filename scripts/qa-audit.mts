@@ -14,6 +14,8 @@ import {
   inviteState,
   isInvitableRole,
 } from "@/server/services/member-policy";
+import { cronFromSchedule, describeSchedule } from "@/server/automations/schedule";
+import { scheduleIsDue } from "@/server/automations/schedule-due";
 import type { FieldDTO, FilterOp } from "@/lib/types";
 import type { FieldType } from "@/server/db/schema";
 
@@ -265,6 +267,31 @@ eq("pending when no expiry set", inviteState({ acceptedAt: null, expiresAt: null
 eq("accepted once redeemed", inviteState({ acceptedAt: nowRef, expiresAt: future }, nowRef), "accepted");
 eq("expired past its expiry", inviteState({ acceptedAt: null, expiresAt: past }, nowRef), "expired");
 eq("accepted beats expired", inviteState({ acceptedAt: nowRef, expiresAt: past }, nowRef), "accepted");
+
+/* ============================ SCHEDULE (cron runner) ============================ */
+console.log("— Schedule: cron generation —");
+eq("hourly → minute wildcard hours", cronFromSchedule({ frequency: "hourly", minute: 15 }), "15 * * * *");
+eq("daily at 09:30", cronFromSchedule({ frequency: "daily", hour: 9, minute: 30 }), "30 9 * * *");
+eq("weekly Mon 08:00", cronFromSchedule({ frequency: "weekly", hour: 8, minute: 0, weekday: 1 }), "0 8 * * 1");
+eq("monthly day 15 at 06:00", cronFromSchedule({ frequency: "monthly", hour: 6, minute: 0, day: 15 }), "0 6 15 * *");
+eq("out-of-range clamps (hour 99→23, minute -1→0)", cronFromSchedule({ frequency: "daily", hour: 99, minute: -1 }), "0 23 * * *");
+eq("monthly day capped at 28", cronFromSchedule({ frequency: "monthly", day: 31, hour: 0, minute: 0 }), "0 0 28 * *");
+
+console.log("— Schedule: human summary —");
+eq("describe daily", describeSchedule({ frequency: "daily", hour: 9, minute: 0 }), "Every day at 09:00");
+eq("describe weekly", describeSchedule({ frequency: "weekly", hour: 17, minute: 30, weekday: 5 }), "Every Friday at 17:30");
+
+console.log("— Schedule: due detection —");
+const utc = (s: string) => new Date(s);
+// Daily 09:00 UTC. Last ran yesterday 09:00; now is today 09:00 → due.
+truthy("daily due when the 09:00 slot has passed since last run",
+  scheduleIsDue({ frequency: "daily", hour: 9, minute: 0, timezone: "UTC" }, utc("2026-07-08T09:00:00Z"), utc("2026-07-09T09:00:00Z")));
+// Same schedule, now is today 08:59 → next occurrence after last run is today 09:00 > now → not due.
+eq("daily not due before the slot",
+  scheduleIsDue({ frequency: "daily", hour: 9, minute: 0, timezone: "UTC" }, utc("2026-07-08T09:00:00Z"), utc("2026-07-09T08:59:00Z")), false);
+// Hourly at :00. Last ran 10:00, now 11:00 → due.
+truthy("hourly due at the next hour",
+  scheduleIsDue({ frequency: "hourly", minute: 0, timezone: "UTC" }, utc("2026-07-09T10:00:00Z"), utc("2026-07-09T11:00:00Z")));
 
 /* ============================ REPORT ============================ */
 console.log(`\n${pass} passed, ${fails.length} failed`);

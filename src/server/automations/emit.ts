@@ -37,6 +37,17 @@ export type ChangeEvent =
       depth: number;
       sourceRunId?: string;
       sourceAutomationId?: string;
+    }
+  | {
+      // Synthesized by the cron runner (not emitted via emitChangeEvent) — a
+      // scheduled automation firing has no triggering record.
+      kind: "scheduled";
+      tableId: string;
+      recordId: null;
+      after: Record<string, unknown>;
+      depth: number;
+      sourceRunId?: string;
+      sourceAutomationId?: string;
     };
 
 export type ChangeEventInput =
