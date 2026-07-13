@@ -68,6 +68,7 @@ async function main() {
   const tableId = t.table.id;
   const fields = (await api(j, "GET", `/api/tables/${tableId}`)).fields;
   const nameF = fields.find((f) => f.isPrimary);
+  const notesF = fields.find((f) => f.name === "Notes");
   const statusF = fields.find((f) => f.name === "Status");
   const dateF = await api(j, "POST", `/api/tables/${tableId}/fields`, { name: "When", type: "date" });
   await api(j, "POST", `/api/tables/${tableId}/fields`, { name: "Upper", type: "formula", options: { expression: "UPPER({Name})" } });
@@ -104,6 +105,16 @@ async function main() {
 
     // open base → grid
     await page.goto(`${B}/base/${base.id}`, { waitUntil: "networkidle0" });
+    await page.evaluate(() => {
+      let text = "";
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: async (next) => { text = String(next); },
+          readText: async () => text,
+        },
+      });
+    });
     await sleep(2200);
     let body = await page.evaluate(() => document.body.innerText);
     check("grid renders records", body.includes("alpha") && body.includes("bravo"));
@@ -124,6 +135,54 @@ async function main() {
     check("inline text edit persisted (server)", rec1Now?.cells[nameF.id] === "alpha2", JSON.stringify(rec1Now?.cells[nameF.id]));
     body = await page.evaluate(() => document.body.innerText);
     check("formula recomputed after edit (ALPHA2)", body.includes("ALPHA2"));
+
+    // spreadsheet keyboard navigation: select a cell, leave edit mode, arrow to
+    // the next one, and assert the active-cell ring moved.
+    await page.click('[data-cell="0:0"]');
+    await page.keyboard.press("Escape");
+    await page.focus('[data-testid="grid-view"]');
+    await page.keyboard.press("ArrowRight");
+    await sleep(200);
+    const navActive = await page.evaluate(() =>
+      document.querySelector('[data-cell="0:1"]')?.className.includes("ring-accent")
+    );
+    check("keyboard ArrowRight moves active cell", navActive);
+
+    // copy/paste matrix: paste into Name + Notes on the seeded record, then
+    // range-copy them back. Use stable record/field selectors because the table
+    // starts with empty rows, so the seeded record is not guaranteed to be row 0.
+    await page.click(`[data-record-id="${rec1.id}"][data-field-id="${nameF.id}"]`);
+    await page.keyboard.press("Escape");
+    await page.focus('[data-testid="grid-view"]');
+    await sleep(150);
+    const pasteOrigin = await page.evaluate(
+      ({ recordId, fieldId }) =>
+        document.querySelector(`[data-record-id="${recordId}"][data-field-id="${fieldId}"]`)?.className.includes("ring-accent"),
+      { recordId: rec1.id, fieldId: nameF.id }
+    );
+    check("paste starts from active first cell", pasteOrigin);
+    const pasteDispatch = await page.evaluate(() => {
+      const grid = document.querySelector('[data-testid="grid-view"]');
+      const event = new ClipboardEvent("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "clipboardData", {
+        value: { getData: (type) => (type === "text/plain" ? "paste-name\tpaste note" : "") },
+      });
+      return { dispatched: grid?.dispatchEvent(event), prevented: event.defaultPrevented };
+    });
+    check("paste event handled by grid", pasteDispatch.prevented, JSON.stringify(pasteDispatch));
+    await sleep(900);
+    const afterPaste = await api(j, "GET", `/api/tables/${tableId}/records`);
+    const pasted = afterPaste.records.find((r) => r.id === rec1.id);
+    check("paste matrix updates Name", pasted?.cells[nameF.id] === "paste-name", JSON.stringify(pasted?.cells[nameF.id]));
+    check("paste matrix updates Notes", pasted?.cells[notesF.id] === "paste note", JSON.stringify(pasted?.cells[notesF.id]));
+    await page.focus('[data-testid="grid-view"]');
+    const mod = process.platform === "darwin" ? "Meta" : "Control";
+    await page.keyboard.down(mod);
+    await page.keyboard.press("C");
+    await page.keyboard.up(mod);
+    await sleep(200);
+    const copiedRange = await page.evaluate(() => navigator.clipboard.readText());
+    check("copy selected range writes TSV", copiedRange === "paste-name\tpaste note", JSON.stringify(copiedRange));
 
     // select menu
     await page.evaluate(() => {
@@ -307,12 +366,12 @@ async function main() {
     /* ---- comments + mentions + notification bell ---- */
     check("notification bell in top bar", await page.$(testid("notification-bell")) !== null);
 
-    // open the expanded record modal for the KNOWN record (rec1 = "alpha2") so the
+    // open the expanded record modal for the KNOWN record (rec1, renamed by paste) so the
     // server-side check targets the right record. row-expand is hover-only; click programmatically.
-    await page.evaluate(() => {
-      const row = [...document.querySelectorAll("div.group")].find((r) => r.textContent.includes("alpha2"));
+    await page.evaluate((recordId) => {
+      const row = document.querySelector(`[data-record-id="${recordId}"]`)?.closest("div.group");
       row?.querySelector('[data-testid="row-expand"]')?.click();
-    });
+    }, rec1.id);
     await page.waitForSelector(testid("record-comments"), { timeout: 4000 }).catch(() => {});
     check("record modal shows comments section", await page.$(testid("record-comments")) !== null);
 
