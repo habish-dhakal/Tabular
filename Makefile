@@ -6,8 +6,8 @@ COMPOSE := docker compose
 COMPOSE_PROD := docker compose -f docker-compose.prod.yml -p tabular-prod
 
 .DEFAULT_GOAL := help
-.PHONY: help setup install env up down db-wait migrate generate seed studio \
-        dev worker build start typecheck verify verify-logic verify-backend \
+.PHONY: help setup install env up down restart db-wait migrate generate seed studio \
+        dev worker build start typecheck pre-commit verify verify-logic verify-backend \
         verify-frontend prod-up prod-down prod-logs reset clean
 
 help: ## Show this help
@@ -32,6 +32,8 @@ up: ## Start Postgres + Redis (docker)
 
 down: ## Stop Postgres + Redis
 	$(COMPOSE) down
+
+restart: down up db-wait ## Restart Postgres + Redis
 
 db-wait: ## Block until Postgres + Redis report healthy
 	@echo "Waiting for Postgres + Redis to be healthy…"
@@ -69,6 +71,9 @@ start: ## Serve the production build on :3100
 
 typecheck: ## Type-check without emitting
 	npm run typecheck
+
+pre-commit: typecheck verify ## Run the local pre-commit gate
+	@echo "✓ Pre-commit gate passed."
 
 ## ---- Verify ------------------------------------------------------------
 
