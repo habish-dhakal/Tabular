@@ -1,4 +1,5 @@
 import type { FieldDTO } from "@/lib/types";
+import { ValueResolver, makeRecordContext } from "@/lib/value-resolver";
 
 /**
  * Token interpolation for action config.
@@ -33,6 +34,12 @@ function stringifyCell(value: unknown): string {
   return String(value);
 }
 
+function stringifyField(fields: FieldDTO[], cells: Record<string, unknown>, fieldId: string): string {
+  const field = fields.find((f) => f.id === fieldId);
+  if (!field) return "";
+  return String(new ValueResolver(fields).resolveField(field, makeRecordContext(fields, cells), "automationToken"));
+}
+
 export type Interpolator = <T>(value: T) => T;
 
 /**
@@ -65,14 +72,14 @@ export function makeInterpolator(
           console.warn(`[automations] unknown item token field "${itemMatch[1]}"`);
           return "";
         }
-        return stringifyCell(item.cells[fieldId]);
+        return stringifyField(item.fields, item.cells, fieldId);
       }
       const fieldId = idByName.get(rawName.toLowerCase());
       if (!fieldId) {
         console.warn(`[automations] unknown token field "${rawName}"`);
         return "";
       }
-      return stringifyCell(cells[fieldId]);
+      return stringifyField(fields, cells, fieldId);
     });
 
   const walk = (value: unknown): unknown => {

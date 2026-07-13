@@ -1,4 +1,5 @@
 import type { FieldType } from "@/server/db/schema";
+import { normalizeFieldValue } from "@/lib/value-resolver";
 
 export type SelectChoice = { id: string; name: string; color: string };
 
@@ -58,74 +59,5 @@ export function coerceCellValue(
   value: unknown,
   options: Record<string, unknown>
 ): unknown {
-  if (value === null || value === undefined || value === "") return undefined;
-
-  switch (type) {
-    case "singleLineText":
-    case "longText":
-    case "url":
-    case "email":
-    case "phone":
-      return String(value);
-
-    case "number":
-    case "currency":
-    case "percent": {
-      const n = typeof value === "number" ? value : Number(value);
-      if (Number.isNaN(n)) throw new Error("Not a number");
-      return n;
-    }
-
-    case "rating": {
-      const max = (options.max as number) ?? 5;
-      const n = Math.round(Number(value));
-      if (Number.isNaN(n)) throw new Error("Not a number");
-      return Math.max(0, Math.min(max, n));
-    }
-
-    case "checkbox":
-      return Boolean(value);
-
-    case "date": {
-      // Store date-only ("YYYY-MM-DD") so it never shifts across timezones.
-      const s = String(value);
-      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-      const d = new Date(s);
-      if (Number.isNaN(d.getTime())) throw new Error("Invalid date");
-      const p = (n: number) => String(n).padStart(2, "0");
-      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-    }
-    case "dateTime": {
-      const d = new Date(value as string);
-      if (Number.isNaN(d.getTime())) throw new Error("Invalid date");
-      return d.toISOString();
-    }
-
-    case "singleSelect": {
-      const choices = (options.choices as SelectChoice[]) ?? [];
-      const idStr = String(value);
-      if (!choices.some((c) => c.id === idStr)) throw new Error("Unknown choice");
-      return idStr;
-    }
-
-    case "multiSelect": {
-      const choices = (options.choices as SelectChoice[]) ?? [];
-      const arr = Array.isArray(value) ? value : [value];
-      const ids = arr.map(String);
-      for (const cid of ids) {
-        if (!choices.some((c) => c.id === cid)) throw new Error("Unknown choice");
-      }
-      return ids;
-    }
-
-    case "attachment":
-      return Array.isArray(value) ? value : [value];
-
-    case "user":
-      return String(value);
-
-    // Computed & link fields are not written directly through cells.
-    default:
-      throw new Error(`Field type "${type}" is not directly editable`);
-  }
+  return normalizeFieldValue(type, value, options);
 }

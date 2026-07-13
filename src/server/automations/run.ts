@@ -7,7 +7,8 @@ import {
   fields as fieldsTable,
 } from "@/server/db/schema";
 import type { FieldDTO, FilterCondition } from "@/lib/types";
-import { evaluateCondition } from "@/lib/query";
+import { evaluateRecordCondition } from "@/lib/query";
+import { makeRecordContext, ValueResolver } from "@/lib/value-resolver";
 import { resolveSenders, type Senders } from "@/server/integrations/senders";
 import { runWithAutomationContext } from "./context";
 import { makeInterpolator, type ItemContext } from "./interpolate";
@@ -43,7 +44,9 @@ class StepFailure extends Error {}
 /** Project a record's cells (keyed by field id) into a name→value map for scripts. */
 function cellsByName(fields: FieldDTO[], cells: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const f of fields) out[f.name] = cells[f.id];
+  const resolver = new ValueResolver(fields);
+  const record = makeRecordContext(fields, cells);
+  for (const f of fields) out[f.name] = resolver.resolveField(f, record, "export");
   return out;
 }
 
@@ -56,10 +59,11 @@ function conditionsMatch(
   const conditions = (config.conditions as FilterCondition[]) ?? [];
   if (conditions.length === 0) return true;
   const byId = new Map(fields.map((f) => [f.id, f]));
+  const record = makeRecordContext(fields, cells);
   const results = conditions.map((c) => {
     const field = byId.get(c.fieldId);
     if (!field) return false;
-    return evaluateCondition(field, cells[c.fieldId], c.op, c.value);
+    return evaluateRecordCondition(field, record, fields, c.op, c.value);
   });
   return (config.conjunction ?? "and") === "or"
     ? results.some(Boolean)

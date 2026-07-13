@@ -3,7 +3,9 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/server/db";
 import { automations, fields as fieldsTable } from "@/server/db/schema";
 import type { FieldDTO, FilterCondition } from "@/lib/types";
-import { evaluateCondition } from "@/lib/query";
+import { evaluateRecordCondition } from "@/lib/query";
+import { makeRecordContext } from "@/lib/value-resolver";
+import { enrichRecords } from "@/server/services/links";
 import { getConnection, AUTOMATION_QUEUE_NAME } from "@/server/automations/queue";
 import { MAX_AUTOMATION_DEPTH } from "@/server/automations/context";
 import { runAutomation } from "@/server/automations/run";
@@ -21,19 +23,31 @@ function evalConditions(
   cells: Record<string, unknown>
 ): boolean {
   if (conditions.length === 0) return true;
+  const fields = [...fieldsById.values()];
+  const record = makeRecordContext(fields, cells);
   const results = conditions.map((c) => {
     const field = fieldsById.get(c.fieldId);
     if (!field) return false;
-    return evaluateCondition(field, cells[c.fieldId], c.op, c.value);
+    return evaluateRecordCondition(field, record, fields, c.op, c.value);
   });
   return conjunction === "or" ? results.some(Boolean) : results.every(Boolean);
+}
+
+async function cellsForConditions(
+  event: ChangeEvent
+): Promise<Record<string, unknown>> {
+  if (event.kind === "record.deleted" || !event.recordId) return event.kind === "record.deleted" ? event.before : {};
+  const rec = { id: event.recordId, cells: { ...event.after } };
+  const [enriched] = await enrichRecords(event.tableId, [rec]);
+  return enriched.cells;
 }
 
 /** Does this automation's trigger fire for this event? */
 function triggerMatches(
   automation: AutomationRow,
   event: ChangeEvent,
-  fieldsById: Map<string, FieldDTO>
+  fieldsById: Map<string, FieldDTO>,
+  conditionCells: Record<string, unknown>
 ): boolean {
   const cfg = automation.triggerConfig ?? {};
   switch (automation.triggerType) {
@@ -55,14 +69,14 @@ function triggerMatches(
     case "recordMatchesCondition": {
       if (event.kind === "record.deleted") return false;
       const conditions = (cfg.conditions as FilterCondition[]) ?? [];
-      return evalConditions(String(cfg.conjunction ?? "and"), conditions, fieldsById, event.after);
+      return evalConditions(String(cfg.conjunction ?? "and"), conditions, fieldsById, conditionCells);
     }
 
     case "recordEntersCondition": {
       if (event.kind === "record.deleted") return false;
       const conditions = (cfg.conditions as FilterCondition[]) ?? [];
       const conjunction = String(cfg.conjunction ?? "and");
-      const after = evalConditions(conjunction, conditions, fieldsById, event.after);
+      const after = evalConditions(conjunction, conditions, fieldsById, conditionCells);
       // "Entered" = did not match before, matches now. Creates have no before.
       const before =
         event.kind === "record.updated"
@@ -98,15 +112,17 @@ async function processEvent(job: Job<ChangeEvent>): Promise<void> {
     where: eq(fieldsTable.tableId, event.tableId),
   })) as unknown as FieldDTO[];
   const fieldsById = new Map(tableFields.map((f) => [f.id, f]));
+  const conditionCells = await cellsForConditions(event);
+  const runEvent = event.kind === "record.deleted" ? event : { ...event, after: conditionCells };
 
   for (const automation of enabled) {
     // Loop guard: don't let an automation re-trigger itself via its own writes.
     if (event.kind === "record.updated" && event.sourceAutomationId === automation.id) continue;
 
-    if (!triggerMatches(automation, event, fieldsById)) continue;
+    if (!triggerMatches(automation, event, fieldsById, conditionCells)) continue;
 
     try {
-      await runAutomation(automation, event);
+      await runAutomation(automation, runEvent);
     } catch (err) {
       // Per-automation isolation: one failing automation doesn't fail the job
       // (or block the others). runAutomation already persists step errors.

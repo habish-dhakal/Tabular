@@ -2,7 +2,8 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/server/db";
 import { fields, recordLinks, records, tables } from "@/server/db/schema";
 import { emitChangeEvent } from "@/server/automations/emit";
-import type { FieldDTO } from "@/lib/types";
+import type { FieldDTO, RecordDTO } from "@/lib/types";
+import { ValueResolver } from "@/lib/value-resolver";
 
 /**
  * Linked records model.
@@ -145,24 +146,6 @@ export async function deleteLinkPair(field: FieldDTO) {
   });
 }
 
-/** Human value of a stored cell, used by lookup/rollup over linked records. */
-function formatValue(field: FieldDTO | undefined, raw: unknown): string | number | boolean | null {
-  if (!field || raw === undefined || raw === null || raw === "") return null;
-  switch (field.type) {
-    case "singleSelect": {
-      const c = (field.options.choices as { id: string; name: string }[])?.find((x) => x.id === raw);
-      return c ? c.name : String(raw);
-    }
-    case "multiSelect": {
-      const cs = (field.options.choices as { id: string; name: string }[]) ?? [];
-      return (raw as string[]).map((id) => cs.find((c) => c.id === id)?.name ?? id).join(", ");
-    }
-    case "checkbox": return Boolean(raw);
-    case "number": case "currency": case "percent": case "rating": return Number(raw);
-    default: return typeof raw === "number" || typeof raw === "boolean" ? raw : String(raw);
-  }
-}
-
 const ROLLUP_FNS = ["COUNT", "SUM", "AVERAGE", "MIN", "MAX", "CONCAT"] as const;
 export type RollupFn = (typeof ROLLUP_FNS)[number];
 
@@ -244,12 +227,25 @@ export async function enrichRecords(
     const byRecord = linkedIdsByField.get(lf.id) ?? new Map();
     const targetTableId = lf.options.linkedTableId as string;
     const targetField = (await db.query.fields.findFirst({ where: eq(fields.id, targetFieldId) })) as unknown as FieldDTO | undefined;
+    const targetFields = (await db.query.fields.findMany({ where: eq(fields.tableId, targetTableId) })) as unknown as FieldDTO[];
+    const resolver = new ValueResolver(targetFields);
 
     const allIds = [...new Set([...byRecord.values()].flat())];
     const valueById = new Map<string, string | number | boolean | null>();
     if (allIds.length) {
       const linked = await db.query.records.findMany({ where: inArray(records.id, allIds) });
-      for (const lr of linked) valueById.set(lr.id, formatValue(targetField, (lr.cells as Record<string, unknown>)[targetFieldId]));
+      for (const lr of linked) {
+        const record = lr as unknown as RecordDTO;
+        const value = targetField ? resolver.resolveField(targetField, record, "export") : null;
+        valueById.set(
+          lr.id,
+          value === undefined || value === null
+            ? null
+            : Array.isArray(value)
+              ? value.map(String).join(", ")
+              : (value as string | number | boolean)
+        );
+      }
     }
 
     for (const r of recs) {
