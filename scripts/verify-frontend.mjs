@@ -352,6 +352,28 @@ async function main() {
       check(`${label} view renders`, txt.length > 0, "empty body");
     }
 
+    /* ---- form view: fill + submit creates a record ---- */
+    await api(j, "POST", `/api/tables/${tableId}/views`, { name: "Intake form", type: "form" });
+    await page.reload({ waitUntil: "networkidle0" }); await sleep(1200);
+    await page.evaluate(() => {
+      const b = [...document.querySelectorAll("button")].find((x) => x.textContent.includes("Intake form"));
+      b && b.click();
+    });
+    await page.waitForSelector(testid("form-view"), { timeout: 4000 }).catch(() => {});
+    check("form view renders", await page.$(testid("form-view")) !== null);
+    const beforeCount = (await api(j, "GET", `/api/tables/${tableId}/records`)).records.length;
+    // focus the primary (first) input inside the fields section — not the header title
+    await page.evaluate((sel) => {
+      document.querySelector(`${sel} input, ${sel} textarea`)?.focus();
+    }, testid("form-fields"));
+    await page.keyboard.type("form-entry");
+    await page.click(testid("form-submit"));
+    await page.waitForFunction(() => document.body.innerText.includes("Response recorded"), { timeout: 4000 }).catch(() => {});
+    check("form shows success state after submit", (await page.evaluate(() => document.body.innerText)).includes("Response recorded"));
+    const afterRecs = (await api(j, "GET", `/api/tables/${tableId}/records`)).records;
+    check("form submit created a record (server)", afterRecs.length === beforeCount + 1, `${beforeCount}→${afterRecs.length}`);
+    check("submitted record carries the typed primary value", afterRecs.some((r) => r.cells[nameF.id] === "form-entry"));
+
     /* ---- member management: settings page + invite create/revoke + accept page ---- */
     await page.goto(`${B}/workspace/${ws}/settings`, { waitUntil: "networkidle0" });
     await page.waitForSelector(testid("members-manager"), { timeout: 4000 }).catch(() => {});

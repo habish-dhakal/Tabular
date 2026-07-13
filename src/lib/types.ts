@@ -54,6 +54,7 @@ export interface ViewConfig {
   stackFieldId?: string | null; // kanban
   dateFieldId?: string | null; // calendar
   coverFieldId?: string | null; // gallery
+  form?: { title?: string; description?: string; submitLabel?: string }; // form
 }
 
 export interface ViewDTO {

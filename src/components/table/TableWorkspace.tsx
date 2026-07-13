@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Table2, Kanban, CalendarDays, LayoutGrid, Plus, Trash2 } from "lucide-react";
+import { Loader2, Table2, Kanban, CalendarDays, LayoutGrid, FileText, Plus, Trash2 } from "lucide-react";
 import { TableProvider, useTable } from "@/components/table/TableProvider";
 import { Toolbar } from "@/components/table/Toolbar";
 import { Popover } from "@/components/ui/Popover";
@@ -12,6 +12,7 @@ import { GridView } from "@/components/table/views/GridView";
 import { KanbanView } from "@/components/table/views/KanbanView";
 import { CalendarView } from "@/components/table/views/CalendarView";
 import { GalleryView } from "@/components/table/views/GalleryView";
+import { FormView } from "@/components/table/views/FormView";
 import type { ViewType } from "@/server/db/schema";
 
 const VIEW_META: Record<ViewType, { icon: typeof Table2; label: string }> = {
@@ -19,7 +20,7 @@ const VIEW_META: Record<ViewType, { icon: typeof Table2; label: string }> = {
   kanban: { icon: Kanban, label: "Kanban" },
   calendar: { icon: CalendarDays, label: "Calendar" },
   gallery: { icon: LayoutGrid, label: "Gallery" },
-  form: { icon: Table2, label: "Form" },
+  form: { icon: FileText, label: "Form" },
 };
 
 function ViewBar() {
@@ -64,7 +65,7 @@ function ViewBar() {
       >
         {(close) => (
           <div className="space-y-0.5">
-            {(Object.keys(VIEW_META) as ViewType[]).filter((t) => t !== "form").map((t) => {
+            {(Object.keys(VIEW_META) as ViewType[]).map((t) => {
               const Icon = VIEW_META[t].icon;
               return (
                 <button
@@ -98,6 +99,7 @@ function ActiveView() {
     case "kanban": return <KanbanView />;
     case "calendar": return <CalendarView />;
     case "gallery": return <GalleryView />;
+    case "form": return <FormView />;
     default: return <GridView />;
   }
 }
@@ -109,7 +111,7 @@ function Inner() {
       {!loading && (
         <>
           <ViewBar />
-          {activeView && <Toolbar type={activeView.type} />}
+          {activeView && activeView.type !== "form" && <Toolbar type={activeView.type} />}
         </>
       )}
       <div className="flex-1 overflow-hidden">
