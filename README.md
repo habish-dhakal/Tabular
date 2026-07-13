@@ -39,6 +39,8 @@ Requires Docker (Postgres + Redis) and Node ≥ 22. A `Makefile` is the single e
 make setup   # deps + .env + docker (postgres + redis) + migrate + seed
 make dev     # app on http://localhost:3100
 make worker  # automation worker (separate terminal; needs Redis)
+make restart # restart local Postgres + Redis
+make pre-commit # full local gate before committing
 make help    # list every target
 ```
 
@@ -87,9 +89,11 @@ Secrets live in `.env` (gitignored); `.env.example` documents every knob. Highli
 ## Verify
 
 ```bash
+make pre-commit    # typecheck + unit + logic + backend + frontend
 make verify        # or: npm run verify
 ```
 
+- `verify:unit` — Vitest unit tests for TDD-friendly service and helper coverage.
 - `verify:logic` (255) — pure logic: formula engine, coercion, filters, member/invite policy, schedule,
   SSRF classifier, cascade-cleanup scrub, rate-limit window. No server needed.
 - `verify:backend` (173) — API integration suite (auth, CRUD, views, tenant isolation, automations,

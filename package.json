@@ -10,6 +10,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "test": "vitest",
+    "test:unit": "vitest",
     "typecheck": "tsc --noEmit",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
@@ -19,10 +21,11 @@
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx --env-file=.env src/server/db/seed.ts",
     "worker": "tsx --env-file=.env src/worker/index.ts",
+    "verify:unit": "vitest run",
     "verify:logic": "tsx scripts/qa-audit.mts",
     "verify:backend": "node scripts/verify-backend.mjs",
     "verify:frontend": "node scripts/verify-frontend.mjs",
-    "verify": "npm run verify:logic && npm run verify:backend && npm run verify:frontend"
+    "verify": "npm run verify:unit && npm run verify:logic && npm run verify:backend && npm run verify:frontend"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.2",
@@ -61,6 +64,7 @@
     "puppeteer-core": "^25.2.1",
     "tailwindcss": "^4",
     "tsx": "^4.22.4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }
