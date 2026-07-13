@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Users } from "lucide-react";
 import { requireUser } from "@/server/session";
 import { ensureDefaultWorkspace, listWorkspacesForUser } from "@/server/services/workspaces";
 import { TopBar } from "@/components/TopBar";
@@ -31,11 +32,20 @@ export default async function DashboardPage() {
                   {ws.role}
                 </span>
               </div>
-              <CreateButton
-                label="New base"
-                placeholder="Name your new base"
-                endpoint={`/api/workspaces/${ws.id}/bases`}
-              />
+              <div className="flex items-center gap-2">
+                <Link
+                  href={`/workspace/${ws.id}/settings`}
+                  className="flex items-center gap-1.5 rounded-lg border border-border-token px-3 py-1.5 text-sm font-medium text-muted transition hover:bg-surface hover:text-foreground"
+                >
+                  <Users size={15} />
+                  Members
+                </Link>
+                <CreateButton
+                  label="New base"
+                  placeholder="Name your new base"
+                  endpoint={`/api/workspaces/${ws.id}/bases`}
+                />
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
               {ws.bases.map((base) => (

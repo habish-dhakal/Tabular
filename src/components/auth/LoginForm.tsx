@@ -12,7 +12,15 @@ function GithubMark() {
   );
 }
 
-export function LoginForm({ devLogin, github }: { devLogin: boolean; github: boolean }) {
+export function LoginForm({
+  devLogin,
+  github,
+  callbackUrl = "/dashboard",
+}: {
+  devLogin: boolean;
+  github: boolean;
+  callbackUrl?: string;
+}) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -30,7 +38,7 @@ export function LoginForm({ devLogin, github }: { devLogin: boolean; github: boo
         setError("Could not sign in. Check the email address.");
         return;
       }
-      router.push("/dashboard");
+      router.push(callbackUrl);
       router.refresh();
     } catch (err) {
       setLoading(false);
@@ -51,7 +59,7 @@ export function LoginForm({ devLogin, github }: { devLogin: boolean; github: boo
 
         {github && (
           <button
-            onClick={() => signIn("github", { callbackUrl: "/dashboard" })}
+            onClick={() => signIn("github", { callbackUrl })}
             className="flex w-full items-center justify-center gap-2 rounded-lg border border-border-token py-2 text-sm font-medium transition hover:bg-surface"
           >
             <GithubMark /> Continue with GitHub

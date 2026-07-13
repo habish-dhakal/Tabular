@@ -87,6 +87,7 @@ async function main() {
 
   /* ---- browser ---- */
   const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-sandbox"] });
+  await browser.defaultBrowserContext().overridePermissions(B, ["clipboard-read", "clipboard-write"]);
   const errors = [];
   try {
     const page = await browser.newPage();
@@ -350,6 +351,39 @@ async function main() {
       const txt = await page.evaluate(() => document.body.innerText);
       check(`${label} view renders`, txt.length > 0, "empty body");
     }
+
+    /* ---- member management: settings page + invite create/revoke + accept page ---- */
+    await page.goto(`${B}/workspace/${ws}/settings`, { waitUntil: "networkidle0" });
+    await page.waitForSelector(testid("members-manager"), { timeout: 4000 }).catch(() => {});
+    check("workspace settings page renders members manager", await page.$(testid("members-manager")) !== null);
+    let settingsBody = await page.evaluate(() => document.body.innerText);
+    check("member list shows the owner (current user)", settingsBody.includes(EMAIL));
+    check("owner is labelled Owner", settingsBody.includes("Owner"));
+
+    // create an invite via the UI (role defaults to editor, no email pin)
+    await page.click(testid("create-invite"));
+    await page.waitForSelector(testid("invite-row"), { timeout: 4000 }).catch(() => {});
+    check("pending invite row appears after create", await page.$(testid("invite-row")) !== null);
+    const invitesApi = await api(j, "GET", `/api/workspaces/${ws}/invites`);
+    check("invite persisted (server)", Array.isArray(invitesApi) && invitesApi.length >= 1, JSON.stringify(invitesApi));
+    const inviteToken = invitesApi[0]?.id;
+
+    // the accept page renders for a signed-in user
+    await page.goto(`${B}/invite/${inviteToken}`, { waitUntil: "networkidle0" });
+    await page.waitForSelector(testid("accept-invite"), { timeout: 4000 }).catch(() => {});
+    check("invite accept page shows Accept button", await page.$(testid("accept-invite")) !== null);
+    const acceptBody = await page.evaluate(() => document.body.innerText);
+    check("accept page names the workspace", acceptBody.includes("Accept invite"));
+
+    // revoke it from the settings page → row disappears, server agrees
+    await page.goto(`${B}/workspace/${ws}/settings`, { waitUntil: "networkidle0" });
+    await page.waitForSelector(testid("invite-row"), { timeout: 4000 }).catch(() => {});
+    await page.evaluate((s) => document.querySelector(`${s} button[aria-label="Revoke invite"]`)?.click(), testid("invite-row"));
+    await sleep(250);
+    await page.evaluate((s) => document.querySelector(s)?.click(), testid("dialog-confirm"));
+    await sleep(500);
+    const invitesAfter = await api(j, "GET", `/api/workspaces/${ws}/invites`);
+    check("invite revoked (server)", Array.isArray(invitesAfter) && invitesAfter.length === 0, JSON.stringify(invitesAfter));
 
     check("zero console/page errors", errors.length === 0, errors.slice(0, 4).join(" | "));
   } finally {
