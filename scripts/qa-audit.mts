@@ -16,6 +16,7 @@ import {
 } from "@/server/services/member-policy";
 import { cronFromSchedule, describeSchedule } from "@/server/automations/schedule";
 import { scheduleIsDue } from "@/server/automations/schedule-due";
+import { isBlockedIp, isBlockedLiteralHost } from "@/server/integrations/ssrf";
 import type { FieldDTO, FilterOp } from "@/lib/types";
 import type { FieldType } from "@/server/db/schema";
 
@@ -292,6 +293,41 @@ eq("daily not due before the slot",
 // Hourly at :00. Last ran 10:00, now 11:00 → due.
 truthy("hourly due at the next hour",
   scheduleIsDue({ frequency: "hourly", minute: 0, timezone: "UTC" }, utc("2026-07-09T10:00:00Z"), utc("2026-07-09T11:00:00Z")));
+
+/* ============================ SSRF GUARD ============================ */
+console.log("— SSRF: blocked IP ranges —");
+truthy("loopback 127.0.0.1", isBlockedIp("127.0.0.1"));
+truthy("loopback 127.9.9.9", isBlockedIp("127.9.9.9"));
+truthy("0.0.0.0", isBlockedIp("0.0.0.0"));
+truthy("private 10.x", isBlockedIp("10.1.2.3"));
+truthy("private 172.16.x", isBlockedIp("172.16.0.1"));
+truthy("private 172.31.x", isBlockedIp("172.31.255.255"));
+truthy("private 192.168.x", isBlockedIp("192.168.1.1"));
+truthy("link-local / metadata 169.254.169.254", isBlockedIp("169.254.169.254"));
+truthy("CGNAT 100.64.x", isBlockedIp("100.64.0.1"));
+truthy("multicast 224.x", isBlockedIp("224.0.0.1"));
+truthy("IPv6 loopback ::1", isBlockedIp("::1"));
+truthy("IPv6 unspecified ::", isBlockedIp("::"));
+truthy("IPv6 unique-local fd00::", isBlockedIp("fd00::1"));
+truthy("IPv6 link-local fe80::", isBlockedIp("fe80::1"));
+truthy("IPv4-mapped ::ffff:127.0.0.1", isBlockedIp("::ffff:127.0.0.1"));
+truthy("garbage is blocked", isBlockedIp("not-an-ip"));
+
+console.log("— SSRF: allowed public IPs —");
+eq("public 8.8.8.8 allowed", isBlockedIp("8.8.8.8"), false);
+eq("public 1.1.1.1 allowed", isBlockedIp("1.1.1.1"), false);
+eq("172.15.x is public", isBlockedIp("172.15.0.1"), false);
+eq("172.32.x is public", isBlockedIp("172.32.0.1"), false);
+eq("public IPv6 allowed", isBlockedIp("2606:4700:4700::1111"), false);
+
+console.log("— SSRF: literal host classification —");
+truthy("localhost blocked", isBlockedLiteralHost("localhost"));
+truthy("*.localhost blocked", isBlockedLiteralHost("app.localhost"));
+truthy(".local blocked", isBlockedLiteralHost("printer.local"));
+truthy(".internal blocked", isBlockedLiteralHost("db.internal"));
+truthy("bracketed IPv6 loopback blocked", isBlockedLiteralHost("[::1]"));
+truthy("empty host blocked", isBlockedLiteralHost(""));
+eq("public hostname not a blocked literal", isBlockedLiteralHost("example.com"), false);
 
 /* ============================ REPORT ============================ */
 console.log(`\n${pass} passed, ${fails.length} failed`);
