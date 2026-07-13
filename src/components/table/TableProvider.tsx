@@ -13,6 +13,7 @@ import type { FieldDTO, RecordDTO, TableBundle, TableDTO, ViewConfig, ViewDTO } 
 import type { LinkChip } from "@/components/cell-editors/LinkPicker";
 import type { FieldType, ViewType } from "@/server/db/schema";
 import { FIELD_TYPE_META } from "@/lib/fields";
+import type { CellPatch } from "@/lib/grid-state";
 import { useDialog } from "@/components/ui/DialogProvider";
 
 interface TableCtx {
@@ -28,6 +29,7 @@ interface TableCtx {
 
   tables: TableDTO[]; // sibling tables in the base (for link fields)
   commitCell: (recordId: string, fieldId: string, value: unknown) => Promise<void>;
+  commitCells: (patches: CellPatch[]) => Promise<void>;
   addRecord: (cells?: Record<string, unknown>) => Promise<RecordDTO | null>;
   deleteRecord: (recordId: string) => Promise<void>;
   setRecordLinks: (recordId: string, fieldId: string, chips: LinkChip[]) => Promise<void>;
@@ -112,21 +114,63 @@ export function TableProvider({ tableId, children }: { tableId: string; children
   );
 
   /* ---- record mutations ---- */
+  const applyCellPatch = (cells: Record<string, unknown>, fieldId: string, value: unknown) => {
+    const next = { ...cells };
+    if (value === null || value === undefined) delete next[fieldId];
+    else next[fieldId] = value;
+    return next;
+  };
+  const valueForPayload = (value: unknown) => (value === undefined ? null : value);
+
   const commitCell = useCallback(async (recordId: string, fieldId: string, value: unknown) => {
     setRecords((prev) =>
       prev.map((r) =>
-        r.id === recordId ? { ...r, cells: { ...r.cells, [fieldId]: value ?? undefined } } : r
+        r.id === recordId ? { ...r, cells: applyCellPatch(r.cells, fieldId, value) } : r
       )
     );
     const res = await fetch(`/api/records/${recordId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cells: { [fieldId]: value } }),
+      body: JSON.stringify({ cells: { [fieldId]: valueForPayload(value) } }),
     });
     if (res.ok) {
       const updated: RecordDTO = await res.json();
       setRecords((prev) => prev.map((r) => (r.id === recordId ? updated : r)));
     }
+  }, []);
+
+  const commitCells = useCallback(async (patches: CellPatch[]) => {
+    if (patches.length === 0) return;
+    const byRecord = new Map<string, CellPatch[]>();
+    for (const patch of patches) byRecord.set(patch.recordId, [...(byRecord.get(patch.recordId) ?? []), patch]);
+
+    setRecords((prev) =>
+      prev.map((record) => {
+        const mine = byRecord.get(record.id);
+        if (!mine) return record;
+        const cells = mine.reduce(
+          (next, patch) => applyCellPatch(next, patch.fieldId, patch.value),
+          record.cells
+        );
+        return { ...record, cells };
+      })
+    );
+
+    const updated = await Promise.all(
+      [...byRecord.entries()].map(async ([recordId, mine]) => {
+        const res = await fetch(`/api/records/${recordId}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            cells: Object.fromEntries(mine.map((patch) => [patch.fieldId, valueForPayload(patch.value)])),
+          }),
+        });
+        return res.ok ? ((await res.json()) as RecordDTO) : null;
+      })
+    );
+    setRecords((prev) =>
+      prev.map((record) => updated.find((next) => next?.id === record.id) ?? record)
+    );
   }, []);
 
   const addRecord = useCallback(
@@ -268,7 +312,7 @@ export function TableProvider({ tableId, children }: { tableId: string; children
   const value: TableCtx = {
     loading, table, fields, records, views, activeView, tables,
     setActiveViewId, config, updateConfig,
-    commitCell, addRecord, deleteRecord, setRecordLinks,
+    commitCell, commitCells, addRecord, deleteRecord, setRecordLinks,
     addField, updateField, deleteField, reorderFields,
     createView, deleteView,
   };
