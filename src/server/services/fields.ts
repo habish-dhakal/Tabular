@@ -84,13 +84,13 @@ export async function reorderFields(tableId: string, order: string[]) {
 
 export async function deleteField(fieldId: string) {
   const field = await db.query.fields.findFirst({ where: eq(fields.id, fieldId) });
-  if (field?.isPrimary) throw new Error("Cannot delete the primary field");
-  if (field?.type === "link") {
-    const { deleteLinkPair } = await import("@/server/services/links");
-    await deleteLinkPair(field as unknown as import("@/lib/types").FieldDTO);
-    return;
-  }
-  await db.delete(fields).where(eq(fields.id, fieldId));
+  if (!field) return;
+  if (field.isPrimary) throw new Error("Cannot delete the primary field");
+  // cascadeDeleteFields widens to the full closure (symmetric link partner +
+  // dependent lookups/rollups) and scrubs every dangling ref in views,
+  // automation triggers, link edges, and record cells.
+  const { cascadeDeleteFields } = await import("@/server/services/cleanup");
+  await db.transaction((tx) => cascadeDeleteFields(tx, [fieldId]));
 }
 
 export async function listFields(tableId: string) {

@@ -17,6 +17,7 @@ import {
 import { cronFromSchedule, describeSchedule } from "@/server/automations/schedule";
 import { scheduleIsDue } from "@/server/automations/schedule-due";
 import { isBlockedIp, isBlockedLiteralHost } from "@/server/integrations/ssrf";
+import { closeFieldDeletion, scrubViewConfig, scrubTriggerConfig } from "@/lib/cleanup-refs";
 import type { FieldDTO, FilterOp } from "@/lib/types";
 import type { FieldType } from "@/server/db/schema";
 
@@ -328,6 +329,71 @@ truthy(".internal blocked", isBlockedLiteralHost("db.internal"));
 truthy("bracketed IPv6 loopback blocked", isBlockedLiteralHost("[::1]"));
 truthy("empty host blocked", isBlockedLiteralHost(""));
 eq("public hostname not a blocked literal", isBlockedLiteralHost("example.com"), false);
+
+/* ============================ CASCADE CLEANUP ============================ */
+console.log("— Cleanup: field-deletion closure —");
+{
+  const F = [
+    { id: "fld_link", options: { relationshipId: "fld_link", symmetricFieldId: "fld_rev" } },
+    { id: "fld_rev", options: { relationshipId: "fld_link", symmetricFieldId: "fld_link", reverse: true } },
+    { id: "fld_lookup", options: { linkFieldId: "fld_link", targetFieldId: "fld_name" } },
+    { id: "fld_rollup", options: { linkFieldId: "fld_link", targetFieldId: "fld_name", fn: "COUNT" } },
+    { id: "fld_name", options: {} },
+    { id: "fld_other", options: {} },
+  ];
+  const del = (seed: string[]) => [...closeFieldDeletion(F, seed)].sort();
+  eq("delete link pulls symmetric partner + its lookups/rollups",
+    del(["fld_link"]), ["fld_link", "fld_lookup", "fld_rev", "fld_rollup"]);
+  eq("delete reverse pulls owner + lookups (mutual symmetricFieldId)",
+    del(["fld_rev"]), ["fld_link", "fld_lookup", "fld_rev", "fld_rollup"]);
+  eq("delete a target field pulls lookups/rollups using it",
+    del(["fld_name"]), ["fld_lookup", "fld_name", "fld_rollup"]);
+  eq("delete an unreferenced field pulls only itself", del(["fld_other"]), ["fld_other"]);
+}
+
+console.log("— Cleanup: view config scrub —");
+{
+  const dead = new Set(["fld_x"]);
+  const cfg = {
+    filters: { conjunction: "and", conditions: [{ fieldId: "fld_x", op: "is", value: 1 }, { fieldId: "fld_y", op: "is", value: 2 }] },
+    sorts: [{ fieldId: "fld_x", direction: "asc" }, { fieldId: "fld_y", direction: "desc" }],
+    groupBy: "fld_x",
+    hiddenFieldIds: ["fld_x", "fld_z"],
+    fieldOrder: ["fld_y", "fld_x"],
+    fieldWidths: { fld_x: 120, fld_y: 200 },
+    kanban: { stackFieldId: "fld_x" },
+    calendar: { dateFieldId: "fld_keep" },
+  };
+  const scrubbed = scrubViewConfig(cfg, dead);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const c = scrubbed.config as any;
+  truthy("view scrub reports changed", scrubbed.changed);
+  eq("filters drop dead condition", c.filters.conditions.map((x: { fieldId: string }) => x.fieldId), ["fld_y"]);
+  eq("sorts drop dead field", c.sorts.map((x: { fieldId: string }) => x.fieldId), ["fld_y"]);
+  eq("groupBy nulled when dead", c.groupBy, null);
+  eq("hiddenFieldIds pruned", c.hiddenFieldIds, ["fld_z"]);
+  eq("fieldOrder pruned", c.fieldOrder, ["fld_y"]);
+  eq("fieldWidths key dropped", c.fieldWidths, { fld_y: 200 });
+  eq("kanban stackFieldId nulled", c.kanban.stackFieldId, null);
+  eq("calendar untouched when not dead", c.calendar.dateFieldId, "fld_keep");
+  eq("no-op scrub reports unchanged", scrubViewConfig({ sorts: [{ fieldId: "fld_live" }] }, dead).changed, false);
+}
+
+console.log("— Cleanup: automation trigger config scrub —");
+{
+  const dead = new Set(["fld_x"]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tcfg = (t: string, cfg: Record<string, unknown>) => scrubTriggerConfig(t, cfg, dead).config as any;
+  eq("recordUpdated watched fieldIds pruned",
+    tcfg("recordUpdated", { watch: "fields", fieldIds: ["fld_x", "fld_y"] }).fieldIds, ["fld_y"]);
+  eq("recordUpdated watch:all untouched",
+    scrubTriggerConfig("recordUpdated", { watch: "all" }, dead).changed, false);
+  eq("recordMatchesCondition conditions pruned",
+    tcfg("recordMatchesCondition", { conjunction: "and", conditions: [{ fieldId: "fld_x", op: "is" }, { fieldId: "fld_y", op: "is" }] }).conditions.map((c: { fieldId: string }) => c.fieldId), ["fld_y"]);
+  eq("recordEntersCondition conditions pruned",
+    tcfg("recordEntersCondition", { conditions: [{ fieldId: "fld_x" }] }).conditions.length, 0);
+  eq("recordCreated has no field refs", scrubTriggerConfig("recordCreated", {}, dead).changed, false);
+}
 
 /* ============================ REPORT ============================ */
 console.log(`\n${pass} passed, ${fails.length} failed`);

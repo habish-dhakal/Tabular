@@ -669,6 +669,67 @@ async function main() {
   const invPinned = await s.req("POST", `/api/workspaces/${workspaceId}/invites`, { role: "editor", email: "someone-else@tabular.dev" });
   check("email-pinned invite rejects wrong user", (await invitee.req("POST", `/api/invites/${invPinned.json.id}/accept`)).status === 403);
 
+  /* ---- cascade cleanup on field/table delete ---- */
+  const cc1 = (await s.req("POST", `/api/bases/${baseId}/tables`, { name: "CC1" })).json.table;
+  const cc2 = (await s.req("POST", `/api/bases/${baseId}/tables`, { name: "CC2" })).json.table;
+  const cc1Fields = async () => (await s.req("GET", `/api/tables/${cc1.id}`)).json.fields;
+  const cc1Views = async () => (await s.req("GET", `/api/tables/${cc1.id}`)).json.views;
+  const cc1Autos = async () => (await s.req("GET", `/api/tables/${cc1.id}/automations`)).json;
+  const cc1Records = async () => (await s.req("GET", `/api/tables/${cc1.id}/records`)).json.records;
+
+  // A scalar field referenced by a view config + an automation trigger + a record cell.
+  const N = (await s.req("POST", `/api/tables/${cc1.id}/fields`, { name: "Num", type: "number" })).json;
+  const ccView = (await cc1Views()).find((v) => v.type === "grid");
+  await s.req("PATCH", `/api/views/${ccView.id}`, { config: {
+    sorts: [{ fieldId: N.id, direction: "asc" }],
+    groupBy: N.id,
+    hiddenFieldIds: [N.id],
+    fieldWidths: { [N.id]: 150 },
+    filters: { conjunction: "and", conditions: [{ id: "c1", fieldId: N.id, op: "gt", value: 0 }] },
+  } });
+  const ccAut = (await s.req("POST", `/api/tables/${cc1.id}/automations`, {
+    name: "Watch Num",
+    triggerType: "recordUpdated",
+    triggerConfig: { watch: "fields", fieldIds: [N.id] },
+    actions: [{ type: "sendEmail", config: { to: "a@b.com", subject: "x", body: "y" } }],
+  })).json;
+  const ccRec = (await s.req("POST", `/api/tables/${cc1.id}/records`, { cells: { [N.id]: 5 } })).json;
+
+  check("cascade: delete scalar field", (await s.req("DELETE", `/api/fields/${N.id}`)).status === 200);
+  const vAfter = (await cc1Views()).find((v) => v.id === ccView.id);
+  check("cascade: view sorts scrubbed", (vAfter.config.sorts ?? []).length === 0, JSON.stringify(vAfter.config.sorts));
+  check("cascade: view groupBy nulled", vAfter.config.groupBy == null);
+  check("cascade: view hiddenFieldIds scrubbed", (vAfter.config.hiddenFieldIds ?? []).length === 0);
+  check("cascade: view fieldWidths key dropped", !(N.id in (vAfter.config.fieldWidths ?? {})));
+  check("cascade: view filter condition scrubbed", (vAfter.config.filters?.conditions ?? []).length === 0);
+  const aAfter = (await cc1Autos()).find((a) => a.id === ccAut.id);
+  check("cascade: automation watched fieldIds scrubbed", (aAfter.triggerConfig.fieldIds ?? []).length === 0, JSON.stringify(aAfter.triggerConfig));
+  const rAfter = (await cc1Records()).find((r) => r.id === ccRec.id);
+  check("cascade: record cell key dropped", !(N.id in (rAfter.cells ?? {})));
+
+  // Link + lookup + rollup: deleting the link cascades its dependents + symmetric partner.
+  const ccLink = (await s.req("POST", `/api/tables/${cc1.id}/fields`, { name: "Link", type: "link", options: { linkedTableId: cc2.id, allowMultiple: true } })).json;
+  const cc2Primary = (await s.req("GET", `/api/tables/${cc2.id}`)).json.fields.find((f) => f.isPrimary);
+  const ccLookup = (await s.req("POST", `/api/tables/${cc1.id}/fields`, { name: "Look", type: "lookup", options: { linkFieldId: ccLink.id, targetFieldId: cc2Primary.id } })).json;
+  const ccRollup = (await s.req("POST", `/api/tables/${cc1.id}/fields`, { name: "Roll", type: "rollup", options: { linkFieldId: ccLink.id, targetFieldId: cc2Primary.id, fn: "COUNT" } })).json;
+  const cc2Before = (await s.req("GET", `/api/tables/${cc2.id}`)).json.fields.length;
+  check("cascade: link created a symmetric field in CC2", cc2Before >= 4, String(cc2Before));
+  check("cascade: delete link field", (await s.req("DELETE", `/api/fields/${ccLink.id}`)).status === 200);
+  const f1 = await cc1Fields();
+  check("cascade: dependent lookup deleted with its link", !f1.some((f) => f.id === ccLookup.id));
+  check("cascade: dependent rollup deleted with its link", !f1.some((f) => f.id === ccRollup.id));
+  const cc2After = (await s.req("GET", `/api/tables/${cc2.id}`)).json.fields.length;
+  check("cascade: symmetric reverse field removed from CC2", cc2After === cc2Before - 1, `${cc2Before}→${cc2After}`);
+
+  // Deleting a whole table cascades external link fields + their dependents in the other table.
+  const ccLink2 = (await s.req("POST", `/api/tables/${cc1.id}/fields`, { name: "Link2", type: "link", options: { linkedTableId: cc2.id, allowMultiple: true } })).json;
+  const ccLookup2 = (await s.req("POST", `/api/tables/${cc1.id}/fields`, { name: "Look2", type: "lookup", options: { linkFieldId: ccLink2.id, targetFieldId: cc2Primary.id } })).json;
+  check("cascade: delete table CC2", (await s.req("DELETE", `/api/tables/${cc2.id}`)).status === 200);
+  const f1Final = await cc1Fields();
+  check("cascade: external link into deleted table removed", !f1Final.some((f) => f.id === ccLink2.id));
+  check("cascade: lookup on external link removed", !f1Final.some((f) => f.id === ccLookup2.id));
+  check("cascade: deleted table is gone (404)", (await s.req("GET", `/api/tables/${cc2.id}`)).status === 404);
+
   /* ---- tenant isolation ---- */
   const intruder = await login("verify-intruder@tabular.dev");
   check("intruder GET base tables → 404", (await intruder.req("GET", `/api/bases/${baseId}/tables`)).status === 404);

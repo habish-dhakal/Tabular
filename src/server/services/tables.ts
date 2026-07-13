@@ -68,5 +68,14 @@ export async function renameTable(tableId: string, name: string) {
 }
 
 export async function deleteTable(tableId: string) {
-  await db.delete(tables).where(eq(tables.id, tableId));
+  // The table's own fields/records/views/automations cascade via FK. What
+  // doesn't: link fields in *other* tables pointing here (their symmetric
+  // partner cascades, but the external side + dependent lookups/rollups would
+  // dangle). Clean those first, then drop the table.
+  const { cascadeDeleteFields, externalLinkFieldsInto } = await import("@/server/services/cleanup");
+  await db.transaction(async (tx) => {
+    const external = await externalLinkFieldsInto(tx, tableId);
+    if (external.length) await cascadeDeleteFields(tx, external);
+    await tx.delete(tables).where(eq(tables.id, tableId));
+  });
 }
