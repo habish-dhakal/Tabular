@@ -18,6 +18,7 @@ import { cronFromSchedule, describeSchedule } from "@/server/automations/schedul
 import { scheduleIsDue } from "@/server/automations/schedule-due";
 import { isBlockedIp, isBlockedLiteralHost } from "@/server/integrations/ssrf";
 import { closeFieldDeletion, scrubViewConfig, scrubTriggerConfig } from "@/lib/cleanup-refs";
+import { memoryCheck, rateLimitConfig, type WindowEntry } from "@/server/rate-limit";
 import type { FieldDTO, FilterOp } from "@/lib/types";
 import type { FieldType } from "@/server/db/schema";
 
@@ -393,6 +394,31 @@ console.log("— Cleanup: automation trigger config scrub —");
   eq("recordEntersCondition conditions pruned",
     tcfg("recordEntersCondition", { conditions: [{ fieldId: "fld_x" }] }).conditions.length, 0);
   eq("recordCreated has no field refs", scrubTriggerConfig("recordCreated", {}, dead).changed, false);
+}
+
+/* ============================ RATE LIMIT ============================ */
+console.log("— Rate limit: config gating —");
+eq("enabled in production", rateLimitConfig({ NODE_ENV: "production" }).enabled, true);
+eq("disabled in development", rateLimitConfig({ NODE_ENV: "development" }).enabled, false);
+eq("force-enabled outside production", rateLimitConfig({ NODE_ENV: "development", RATE_LIMIT_FORCE: "1" }).enabled, true);
+eq("max=0 disables even in production", rateLimitConfig({ NODE_ENV: "production", RATE_LIMIT_MAX: "0" }).enabled, false);
+eq("custom max honoured", rateLimitConfig({ NODE_ENV: "production", RATE_LIMIT_MAX: "10" }).max, 10);
+eq("default window is 60s", rateLimitConfig({ NODE_ENV: "production" }).windowSec, 60);
+
+console.log("— Rate limit: fixed-window counter —");
+{
+  const store = new Map<string, WindowEntry>();
+  const hit = (t: number) => memoryCheck(store, "1.2.3.4", t, 3, 1000);
+  const r1 = hit(0), r2 = hit(0), r3 = hit(0), r4 = hit(500), r5 = hit(1000);
+  eq("1st allowed, 2 remaining", [r1.allowed, r1.remaining], [true, 2]);
+  eq("2nd allowed, 1 remaining", [r2.allowed, r2.remaining], [true, 1]);
+  eq("3rd allowed at the cap, 0 remaining", [r3.allowed, r3.remaining], [true, 0]);
+  eq("4th blocked over the cap", r4.allowed, false);
+  eq("blocked reports retryAfter within the window", r4.retryAfterSec, 1);
+  eq("remaining floors at 0 when blocked", r4.remaining, 0);
+  eq("window resets after it elapses", [r5.allowed, r5.remaining], [true, 2]);
+  // independent keys keep separate budgets
+  eq("distinct key has its own budget", memoryCheck(store, "9.9.9.9", 1000, 3, 1000).allowed, true);
 }
 
 /* ============================ REPORT ============================ */

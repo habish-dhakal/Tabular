@@ -103,6 +103,11 @@ async function main() {
   const anon = makeSession();
   check("unauth GET /api/workspaces → 401", (await anon.req("GET", "/api/workspaces")).status === 401);
 
+  /* ---- health endpoint (unauthenticated, unthrottled) ---- */
+  const health = await anon.req("GET", "/api/health");
+  check("health endpoint returns 200", health.status === 200, String(health.status));
+  check("health reports db up + status ok", health.json?.status === "ok" && health.json?.db === "up", JSON.stringify(health.json));
+
   /* ---- login + self-heal workspace ---- */
   const s = await login("verify@tabular.dev");
   const ws = await s.req("GET", "/api/workspaces");
