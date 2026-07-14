@@ -55,6 +55,17 @@ describe("CSV import planning", () => {
     expect(plan.columns[0]).toMatchObject({ action: "create", type: "currency" });
     expect(plan.validRows).toBe(1);
   });
+
+  it("plans duplicate Airtable CSV headers as separate import columns", () => {
+    const plan = buildCsvImportPlan(parseCsv("Questionnaire Wizard?,Questionnaire Wizard?\nYes,No"), [], []);
+
+    expect(plan.headers).toEqual(["Questionnaire Wizard?", "Questionnaire Wizard? (2)"]);
+    expect(plan.columns.map((column) => column.fieldName)).toEqual(["Questionnaire Wizard?", "Questionnaire Wizard? (2)"]);
+    expect(plan.rows[0].source).toEqual({
+      "Questionnaire Wizard?": "Yes",
+      "Questionnaire Wizard? (2)": "No",
+    });
+  });
 });
 
 describe("Airtable migration plan", () => {

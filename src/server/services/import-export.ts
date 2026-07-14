@@ -1,6 +1,6 @@
 import { asc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { parseCsv, stringifyCsv } from "@/lib/csv";
+import { parseCsv, stringifyCsvMatrix } from "@/lib/csv";
 import {
   buildCsvImportPlan,
   planAirtableImport,
@@ -154,12 +154,12 @@ export async function exportTableCsv(tableId: string, viewId?: string) {
   const visibleFields = visibleFieldsForExport(tableFields, view);
   const resolver = new ValueResolver(tableFields);
   const rows = exportedRecords.map((record) =>
-    Object.fromEntries(visibleFields.map((field) => [field.name, serializeExportValue(resolver.resolveField(field, record, "export"))]))
+    visibleFields.map((field) => serializeExportValue(resolver.resolveField(field, record, "export")))
   );
 
   return {
     filename: `${safeFilename(table.name)}${view ? `-${safeFilename(view.name)}` : ""}.csv`,
-    csv: stringifyCsv(visibleFields.map((field) => field.name), rows),
+    csv: stringifyCsvMatrix(visibleFields.map((field) => field.name), rows),
   };
 }
 

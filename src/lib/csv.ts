@@ -6,21 +6,36 @@ export interface ParsedCsv {
 export function parseCsv(text: string): ParsedCsv {
   const matrix = parseCsvMatrix(text);
   if (matrix.length === 0) throw new Error("CSV is empty");
-  const headers = matrix[0].map((header) => header.trim());
-  if (headers.length === 0 || headers.every((header) => !header)) throw new Error("CSV needs a header row");
-
-  const seen = new Set<string>();
-  for (const header of headers) {
-    if (!header) throw new Error("CSV headers cannot be blank");
-    const key = header.toLowerCase();
-    if (seen.has(key)) throw new Error(`Duplicate CSV header "${header}"`);
-    seen.add(key);
-  }
+  const headers = uniqueCsvHeaders(matrix[0]);
 
   const rows = matrix.slice(1)
     .filter((row) => row.some((cell) => cell.trim() !== ""))
     .map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ""])));
   return { headers, rows };
+}
+
+export function uniqueCsvHeaders(rawHeaders: string[]): string[] {
+  const trimmed = rawHeaders.map((header) => header.trim());
+  if (trimmed.length === 0 || trimmed.every((header) => !header)) throw new Error("CSV needs a header row");
+
+  const claimed = new Set<string>();
+  const sourceCounts = new Map<string, number>();
+  return trimmed.map((header) => {
+    if (!header) throw new Error("CSV headers cannot be blank");
+
+    const sourceKey = header.toLowerCase();
+    const sourceCount = (sourceCounts.get(sourceKey) ?? 0) + 1;
+    sourceCounts.set(sourceKey, sourceCount);
+
+    let suffix = sourceCount;
+    let candidate = sourceCount === 1 ? header : `${header} (${sourceCount})`;
+    while (claimed.has(candidate.toLowerCase())) {
+      suffix += 1;
+      candidate = `${header} (${suffix})`;
+    }
+    claimed.add(candidate.toLowerCase());
+    return candidate;
+  });
 }
 
 function parseCsvMatrix(text: string): string[][] {
@@ -65,6 +80,13 @@ export function stringifyCsv(headers: string[], rows: Record<string, unknown>[])
   return [
     headers.map(escapeCsvCell).join(","),
     ...rows.map((row) => headers.map((header) => escapeCsvCell(row[header])).join(",")),
+  ].join("\n");
+}
+
+export function stringifyCsvMatrix(headers: string[], rows: unknown[][]): string {
+  return [
+    headers.map(escapeCsvCell).join(","),
+    ...rows.map((row) => row.map(escapeCsvCell).join(",")),
   ].join("\n");
 }
 
