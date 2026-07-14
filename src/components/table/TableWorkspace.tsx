@@ -110,14 +110,14 @@ function ActiveView() {
 function Inner() {
   const { loading, activeView } = useTable();
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
       {!loading && (
         <>
           <ViewBar />
           {activeView && activeView.type !== "form" && <Toolbar type={activeView.type} />}
         </>
       )}
-      <div className="flex-1 overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-hidden">
         <ActiveView />
       </div>
       <AutomationsPanel />
@@ -125,9 +125,17 @@ function Inner() {
   );
 }
 
-export function TableWorkspace({ tableId }: { tableId: string }) {
+export function TableWorkspace({
+  tableId,
+  initialViewId,
+  onViewChange,
+}: {
+  tableId: string;
+  initialViewId?: string;
+  onViewChange?: (viewId: string | null) => void;
+}) {
   return (
-    <TableProvider tableId={tableId}>
+    <TableProvider tableId={tableId} initialViewId={initialViewId} onViewChange={onViewChange}>
       <AutomationsProvider tableId={tableId}>
         <Inner />
       </AutomationsProvider>

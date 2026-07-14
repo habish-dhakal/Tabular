@@ -395,6 +395,39 @@ async function main() {
   check("CSV partial import creates mapped field", !!scoreField && scoreField.type === "number", JSON.stringify(scoreField));
   check("CSV partial import stores normalized row value", alphaRecord?.cells?.[scoreField.id] === 10, JSON.stringify(alphaRecord?.cells));
 
+  const createImport = await s.req("POST", `/api/bases/${baseId}/import/commit`, {
+    targetMode: "create",
+    tableName: "Questionnaire Import",
+    mode: "strict",
+    csv: "Questionnaire,Task Status,Due Date,SecurityPal Customer ID\nQ1,Done,2026/07/14,SP-1\nQ2,Todo,2026/07/15,SP-1",
+  });
+  check("CSV create-table import creates a new table and view",
+    createImport.status === 200 && createImport.json.targetMode === "create" && createImport.json.tableId && createImport.json.viewId,
+    JSON.stringify(createImport.json));
+  const createdImportBundle = await s.req("GET", `/api/tables/${createImport.json.tableId}`);
+  const createdQuestionnaireField = createdImportBundle.json.fields.find((field) => field.name === "Questionnaire");
+  const createdStatusField = createdImportBundle.json.fields.find((field) => field.name === "Task Status");
+  const createdDueField = createdImportBundle.json.fields.find((field) => field.name === "Due Date");
+  check("CSV create-table import infers useful field types",
+    createdQuestionnaireField?.isPrimary === true && createdStatusField?.type === "singleSelect" && createdDueField?.type === "date",
+    JSON.stringify(createdImportBundle.json.fields));
+  const createdImportRecords = await s.req("GET", `/api/tables/${createImport.json.tableId}/records`);
+  check("CSV create-table import writes records",
+    createdImportRecords.json.records?.some((record) => record.cells?.[createdQuestionnaireField.id] === "Q1") &&
+      createdImportRecords.json.records?.length === 2,
+    JSON.stringify(createdImportRecords.json.records));
+
+  const mergeImport = await s.req("POST", `/api/bases/${baseId}/import/commit`, {
+    targetMode: "merge",
+    tableId: createImport.json.tableId,
+    mergeFieldId: createdQuestionnaireField.id,
+    mode: "strict",
+    csv: "Questionnaire,Task Status\nQ1,Todo\nQ3,Done",
+  });
+  check("CSV merge import updates matched rows and creates unmatched rows",
+    mergeImport.status === 200 && mergeImport.json.updatedRows === 1 && mergeImport.json.insertedRows === 1,
+    JSON.stringify(mergeImport.json));
+
   const exportConfig = {
     hiddenFieldIds: [scoreField.id],
     filters: { conjunction: "and", conditions: [{ id: "imp1", fieldId: importPrimary.id, op: "is", value: "Alpha" }] },
@@ -413,6 +446,23 @@ async function main() {
   check("JSON backup export includes tables and records",
     jsonBackup.status === 200 && jsonBackup.json.tables?.some((item) => item.table.id === importTableId && item.records.length >= 1),
     JSON.stringify(jsonBackup.json?.tables?.map((item) => item.table.name)));
+
+  const replaceImport = await s.req("POST", `/api/bases/${baseId}/import/commit`, {
+    targetMode: "replace",
+    tableId: importTableId,
+    tableName: "Replaced Import Ops",
+    confirmReplace: true,
+    mode: "strict",
+    csv: "Questionnaire,Task Status\nQ-Replace,Done",
+  });
+  check("CSV replace import replaces starter table schema and rows",
+    replaceImport.status === 200 && replaceImport.json.targetMode === "replace" && replaceImport.json.insertedRows === 1,
+    JSON.stringify(replaceImport.json));
+  const replacedBundle = await s.req("GET", `/api/tables/${importTableId}`);
+  const replacedFields = replacedBundle.json.fields.map((field) => field.name);
+  check("CSV replace import removes starter fields",
+    replacedFields.join(",") === "Questionnaire,Task Status",
+    JSON.stringify(replacedFields));
 
   const airtablePlan = await s.req("POST", `/api/bases/${baseId}/airtable-import/plan`, {
     id: "app_questionnaire",

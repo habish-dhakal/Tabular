@@ -374,7 +374,7 @@ export function normalizeFieldValue(
     case "number":
     case "currency":
     case "percent": {
-      const n = typeof value === "number" ? value : Number(value);
+      const n = typeof value === "number" ? value : Number(String(value).replace(/[$€£¥,%\s]/g, ""));
       if (Number.isNaN(n)) throw new Error("Not a number");
       return n;
     }

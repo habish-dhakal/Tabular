@@ -93,6 +93,9 @@ async function main() {
   const lookupField = await api(j, "POST", `/api/tables/${tableId}/fields`, { name: "RefNames", type: "lookup", options: { linkFieldId: linkField.id, targetFieldId: t2Primary.id } });
   const rollupField = await api(j, "POST", `/api/tables/${tableId}/fields`, { name: "RefCount", type: "rollup", options: { linkFieldId: linkField.id, targetFieldId: t2Primary.id, fn: "COUNT" } });
   await api(j, "PUT", `/api/records/${rec1.id}/links`, { fieldId: linkField.id, targetIds: [refOne.id] });
+  for (let i = 0; i < 60; i++) {
+    await api(j, "POST", `/api/tables/${tableId}/records`, { cells: { [nameF.id]: `scroll-row-${i}`, [statusF.id]: i % 2 ? "todo" : "done" } });
+  }
 
   /* ---- browser ---- */
   const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-sandbox"] });
@@ -128,6 +131,7 @@ async function main() {
     check("grid renders records", body.includes("alpha") && body.includes("bravo"));
     check("grid shows Status chips", body.includes("Todo") || body.includes("Done"));
     check("formula column computed (ALPHA)", body.includes("ALPHA"));
+    check("base URL stores active table/view", page.url().includes(`table=${tableId}`) && page.url().includes(`view=${t.viewId}`), page.url());
 
     // inline text edit on a Name cell (input selects-all on focus → typing replaces)
     await page.evaluate(() => {
@@ -263,6 +267,45 @@ async function main() {
     // UI reflects the recomputed rollup (grid re-fetched after link change)
     body = await page.evaluate(() => document.body.innerText);
     check("grid shows both linked names", body.includes("Ref One") && body.includes("Ref Two"));
+
+    await page.goto(`${B}/base/${base.id}?table=${t2Id}&view=${t2.viewId}`, { waitUntil: "networkidle0" });
+    await page.waitForFunction(() => document.body.innerText.includes("Ref Two"), { timeout: 5000 }).catch(() => {});
+    body = await page.evaluate(() => document.body.innerText);
+    check("table query param opens requested table", body.includes("Ref One") && body.includes("Ref Two") && page.url().includes(`table=${t2Id}`), `${page.url()} — ${body.slice(0, 220)}`);
+    await page.reload({ waitUntil: "networkidle0" });
+    await sleep(1000);
+    body = await page.evaluate(() => document.body.innerText);
+    check("refresh preserves active table", page.url().includes(`table=${t2Id}`) && body.includes("Ref Two"), page.url());
+    await page.goto(`${B}/base/${base.id}?table=${tableId}&view=${t.viewId}`, { waitUntil: "networkidle0" });
+    await sleep(1200);
+    const gridMetrics = await page.evaluate(() => {
+      const grid = document.querySelector('[data-testid="grid-view"]');
+      if (!grid) return null;
+      grid.scrollTop = grid.scrollHeight;
+      grid.scrollLeft = grid.scrollWidth;
+      const style = getComputedStyle(grid);
+      const scrollTop = grid.scrollTop;
+      const scrollLeft = grid.scrollLeft;
+      grid.scrollTop = 0;
+      grid.scrollLeft = 0;
+      return {
+        clientHeight: grid.clientHeight,
+        scrollHeight: grid.scrollHeight,
+        scrollTop,
+        clientWidth: grid.clientWidth,
+        scrollWidth: grid.scrollWidth,
+        scrollLeft,
+        overflowY: style.overflowY,
+        overflowX: style.overflowX,
+        windowHeight: window.innerHeight,
+      };
+    });
+    check("wide grid has a constrained scroll viewport",
+      !!gridMetrics && gridMetrics.clientHeight < gridMetrics.windowHeight && gridMetrics.overflowY === "auto" && gridMetrics.overflowX === "auto",
+      JSON.stringify(gridMetrics));
+    check("wide grid scrolls vertically and horizontally",
+      !!gridMetrics && gridMetrics.scrollTop > 0 && gridMetrics.scrollLeft > 0,
+      JSON.stringify(gridMetrics));
 
     // server-side view search: the toolbar input should narrow the active view
     // through /api/views/:viewId/records, then recover when cleared.
@@ -446,20 +489,21 @@ async function main() {
     }
 
     /* ---- form view: fill + submit creates a record ---- */
-    await api(j, "POST", `/api/tables/${tableId}/views`, { name: "Intake form", type: "form" });
-    await page.reload({ waitUntil: "networkidle0" }); await sleep(1200);
-    await page.evaluate(() => {
-      const b = [...document.querySelectorAll("button")].find((x) => x.textContent.includes("Intake form"));
-      b && b.click();
-    });
-    await page.waitForSelector(testid("form-view"), { timeout: 4000 }).catch(() => {});
+    const formView = await api(j, "POST", `/api/tables/${tableId}/views`, { name: "Intake form", type: "form" });
+    await page.goto(`${B}/base/${base.id}?table=${tableId}&view=${formView.id}`, { waitUntil: "networkidle0" });
+    await page.waitForSelector(testid("form-fields"), { timeout: 5000 }).catch(() => {});
     check("form view renders", await page.$(testid("form-view")) !== null);
     const beforeCount = (await api(j, "GET", `/api/tables/${tableId}/records`)).records.length;
-    // focus the primary (first) input inside the fields section — not the header title
-    await page.evaluate((sel) => {
-      document.querySelector(`${sel} input, ${sel} textarea`)?.focus();
+    // Fill the primary field inside the fields section — not the editable form title.
+    const formFill = await page.evaluate((sel) => {
+      const el = document.querySelector(`${sel} input, ${sel} textarea`);
+      if (!el) return { ok: false, text: document.querySelector(sel)?.textContent ?? "" };
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), "value")?.set;
+      setter?.call(el, "form-entry");
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      return { ok: true };
     }, testid("form-fields"));
-    await page.keyboard.type("form-entry");
+    check("form primary field can be filled", formFill.ok, JSON.stringify(formFill));
     await page.click(testid("form-submit"));
     await page.waitForFunction(() => document.body.innerText.includes("Response recorded"), { timeout: 4000 }).catch(() => {});
     check("form shows success state after submit", (await page.evaluate(() => document.body.innerText)).includes("Response recorded"));

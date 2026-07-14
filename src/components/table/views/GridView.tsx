@@ -327,7 +327,7 @@ export function GridView() {
       tabIndex={0}
       onKeyDown={handleKeyDown}
       onMouseDown={() => parentRef.current?.focus()}
-      className="thin-scroll h-full overflow-auto bg-background outline-none"
+      className="thin-scroll h-full min-h-0 overflow-auto bg-background outline-none"
     >
       <div style={{ width: totalWidth }} className="relative">
         {viewQueryWarning && (

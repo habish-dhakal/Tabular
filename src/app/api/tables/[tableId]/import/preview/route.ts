@@ -17,6 +17,10 @@ const mapping = z.object({
 
 const body = z.object({
   csv: z.string().min(1).max(5_000_000),
+  targetMode: z.enum(["append", "replace", "create", "merge"]).optional(),
+  tableName: z.string().optional(),
+  mergeFieldId: z.string().optional(),
+  mergeHeader: z.string().optional(),
   mappings: z.array(mapping).optional(),
   createMissingFields: z.boolean().optional(),
 });

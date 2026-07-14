@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { parseCsv } from "@/lib/csv";
-import { buildCsvImportPlan, inferFieldType, planAirtableImport } from "@/lib/import-export";
+import { buildCsvImportPlan, inferFieldType, inferFieldTypeProfile, planAirtableImport } from "@/lib/import-export";
 import type { FieldDTO, RecordDTO } from "@/lib/types";
 
 const field = (
@@ -26,6 +26,18 @@ describe("CSV import planning", () => {
     expect(inferFieldType(["true", "false"])).toBe("checkbox");
     expect(inferFieldType(["a@example.com"])).toBe("email");
     expect(inferFieldType(["https://example.com"])).toBe("url");
+    expect(inferFieldType(["Todo", "Done", "Todo"], "Task Status")).toBe("singleSelect");
+    expect(inferFieldType(["75%", "10%"], "Completion Percentage")).toBe("percent");
+    expect(inferFieldType(["2026/07/14", "2026/07/15"], "Due Date")).toBe("date");
+    expect(inferFieldType(["SP-001", "SP-002"], "SecurityPal Customer ID")).toBe("singleLineText");
+  });
+
+  it("returns explainable inference confidence", () => {
+    const inferred = inferFieldTypeProfile("Task Status", ["Todo", "Done", "Todo"]);
+
+    expect(inferred.type).toBe("singleSelect");
+    expect(inferred.confidence).toBeGreaterThan(0.7);
+    expect(inferred.reasons.join(" ")).toContain("status");
   });
 
   it("reports invalid rows before writes", () => {
@@ -64,6 +76,25 @@ describe("CSV import planning", () => {
     expect(plan.rows[0].source).toEqual({
       "Questionnaire Wizard?": "Yes",
       "Questionnaire Wizard? (2)": "No",
+    });
+  });
+
+  it("suggests merge keys and customer relationship candidates", () => {
+    const customerId = field("fld_customer_id", "SecurityPal Customer ID", "singleLineText", { unique: true });
+    const plan = buildCsvImportPlan(
+      parseCsv("Questionnaire,Client Name,SecurityPal Customer ID,SF ID,Task Status\nQ1,Acme,SP-1,SF-1,Done\nQ2,Acme,SP-1,SF-1,Todo\nQ3,Globex,SP-2,SF-2,Todo"),
+      [customerId],
+      [],
+      { targetMode: "merge", mergeFieldId: customerId.id }
+    );
+
+    expect(plan.targetMode).toBe("merge");
+    expect(plan.mergeCandidates[0]).toMatchObject({ header: "SecurityPal Customer ID", fieldId: customerId.id });
+    expect(plan.selectedMerge).toMatchObject({ header: "SecurityPal Customer ID" });
+    expect(plan.relationshipSuggestions[0]).toMatchObject({
+      tableName: "Customers",
+      keyHeader: "SecurityPal Customer ID",
+      uniqueEntities: 2,
     });
   });
 });

@@ -62,7 +62,17 @@ export function useTable() {
   return ctx;
 }
 
-export function TableProvider({ tableId, children }: { tableId: string; children: React.ReactNode }) {
+export function TableProvider({
+  tableId,
+  initialViewId,
+  onViewChange,
+  children,
+}: {
+  tableId: string;
+  initialViewId?: string;
+  onViewChange?: (viewId: string | null) => void;
+  children: React.ReactNode;
+}) {
   const dialog = useDialog();
   const [loading, setLoading] = useState(true);
   const [table, setTable] = useState<TableBundle["table"] | null>(null);
@@ -88,7 +98,9 @@ export function TableProvider({ tableId, children }: { tableId: string; children
       setTable(bundle.table);
       setFields([...bundle.fields].sort((a, b) => a.position - b.position));
       setViews(bundle.views);
-      setActiveViewId(bundle.views[0]?.id ?? null);
+      const nextViewId = viewIdForBundle(bundle.views, initialViewId);
+      setActiveViewId(nextViewId);
+      if (!initialViewId) onViewChange?.(nextViewId);
       setLoading(false);
       // Sibling tables in the base — used as link targets.
       fetch(`/api/bases/${bundle.table.baseId}/tables`)
@@ -98,13 +110,18 @@ export function TableProvider({ tableId, children }: { tableId: string; children
     return () => {
       alive = false;
     };
-  }, [tableId]);
+  }, [initialViewId, onViewChange, tableId]);
 
   const activeView = useMemo(
     () => views.find((v) => v.id === activeViewId) ?? null,
     [views, activeViewId]
   );
   const config = activeView?.config ?? {};
+
+  const selectView = useCallback((viewId: string) => {
+    setActiveViewId(viewId);
+    onViewChange?.(viewId);
+  }, [onViewChange]);
 
   const fetchViewRecords = useCallback(async (
     viewId: string,
@@ -159,15 +176,15 @@ export function TableProvider({ tableId, children }: { tableId: string; children
     setTable(bundle.table);
     setFields([...bundle.fields].sort((a, b) => a.position - b.position));
     setViews(bundle.views);
-    setActiveViewId((current) =>
-      current && bundle.views.some((view) => view.id === current)
-        ? current
-        : bundle.views[0]?.id ?? null
-    );
+    setActiveViewId((current) => {
+      const nextViewId = viewIdForBundle(bundle.views, current ?? initialViewId);
+      if (!initialViewId) onViewChange?.(nextViewId);
+      return nextViewId;
+    });
     const siblings = await fetch(`/api/bases/${bundle.table.baseId}/tables`).then((r) => r.json());
     setTables(siblings.tables ?? []);
     setLoading(false);
-  }, [tableId]);
+  }, [initialViewId, onViewChange, tableId]);
 
   /* ---- debounced view-config persistence ---- */
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -387,10 +404,10 @@ export function TableProvider({ tableId, children }: { tableId: string; children
       if (!res.ok) return null;
       const view: ViewDTO = await res.json();
       setViews((prev) => [...prev, view]);
-      setActiveViewId(view.id);
+      selectView(view.id);
       return view;
     },
-    [tableId]
+    [selectView, tableId]
   );
 
   const deleteView = useCallback(
@@ -399,7 +416,11 @@ export function TableProvider({ tableId, children }: { tableId: string; children
       if (res.ok) {
         setViews((prev) => {
           const next = prev.filter((v) => v.id !== viewId);
-          setActiveViewId((cur) => (cur === viewId ? next[0]?.id ?? null : cur));
+          setActiveViewId((cur) => {
+            const nextViewId = cur === viewId ? next[0]?.id ?? null : cur;
+            onViewChange?.(nextViewId);
+            return nextViewId;
+          });
           return next;
         });
       } else {
@@ -407,14 +428,14 @@ export function TableProvider({ tableId, children }: { tableId: string; children
         void dialog.alert({ title: "Something went wrong", message: error });
       }
     },
-    []
+    [onViewChange]
   );
 
   const value: TableCtx = {
     loading, table, fields, records, recordLoading, recordTotal, recordsLoaded,
     hasMoreRecords, viewQueryMode, viewQueryWarning, viewSearch, setViewSearch,
     loadMoreRecords, views, activeView, tables,
-    setActiveViewId, config, updateConfig, reloadTable,
+    setActiveViewId: selectView, config, updateConfig, reloadTable,
     commitCell, commitCells, addRecord, deleteRecord, setRecordLinks,
     addField, updateField, deleteField, reorderFields,
     createView, deleteView,
@@ -424,3 +445,7 @@ export function TableProvider({ tableId, children }: { tableId: string; children
 }
 
 export { FIELD_TYPE_META };
+
+function viewIdForBundle(views: ViewDTO[], requested?: string | null) {
+  return requested && views.some((view) => view.id === requested) ? requested : views[0]?.id ?? null;
+}

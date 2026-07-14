@@ -1,10 +1,10 @@
 import { z } from "zod";
 import { handle, requireUserId } from "@/server/api-helpers";
-import { assertTableAccess } from "@/server/services/access";
-import { commitCsvImport } from "@/server/services/import-export";
+import { assertBaseAccess } from "@/server/services/access";
+import { previewBaseCsvImport } from "@/server/services/import-export";
 import { fieldTypes } from "@/server/db/schema";
 
-type Params = { params: Promise<{ tableId: string }> };
+type Params = { params: Promise<{ baseId: string }> };
 
 const mapping = z.object({
   header: z.string().min(1),
@@ -17,12 +17,11 @@ const mapping = z.object({
 
 const body = z.object({
   csv: z.string().min(1).max(5_000_000),
-  mode: z.enum(["strict", "partial"]).optional(),
   targetMode: z.enum(["append", "replace", "create", "merge"]).optional(),
+  tableId: z.string().optional(),
   tableName: z.string().optional(),
   mergeFieldId: z.string().optional(),
   mergeHeader: z.string().optional(),
-  confirmReplace: z.boolean().optional(),
   mappings: z.array(mapping).optional(),
   createMissingFields: z.boolean().optional(),
 });
@@ -30,9 +29,8 @@ const body = z.object({
 export async function POST(req: Request, { params }: Params) {
   return handle(async () => {
     const userId = await requireUserId();
-    const { tableId } = await params;
-    await assertTableAccess(userId, tableId, true);
-    const parsed = body.parse(await req.json());
-    return commitCsvImport(tableId, userId, parsed);
+    const { baseId } = await params;
+    await assertBaseAccess(userId, baseId, true);
+    return previewBaseCsvImport(baseId, body.parse(await req.json()));
   });
 }
