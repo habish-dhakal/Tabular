@@ -214,15 +214,87 @@ Required tests:
 - Type conversion preview catches lossy changes.
 - `make pre-commit`.
 
-## Phase 4: Import, Export, And Airtable Data Movement
+## Phase 4: Import, Export, And Airtable CSV Foundation
 
 Branch: `phase-04-import-export`
 
-PR title: `Phase 4: Add import/export and Airtable data movement`
+PR title: `Phase 4: Add import/export and Airtable CSV foundation`
 
-Goal: safely move Airtable-shaped data into and out of Tabular without
-surprising users, losing data, or forcing wide operational CSVs into the wrong
-shape.
+Goal: give Tabular a safe baseline for CSV import, CSV export, and JSON backup
+without pretending the baseline is a full migration product.
+
+Engineering guidance:
+
+- Keep the implementation focused on the first usable import/export slice.
+- Separate parsing, validation, mapping, database writing, and reporting.
+- Import UI must not contain import business logic.
+- Export must use the same value engine as imports.
+- Preserve source row order and produce a basic report for created fields,
+  created rows, skipped rows, invalid rows, and duplicate headers.
+- Parsing must support duplicate headers by stable disambiguation, for example
+  `Questionnaire Wizard?` and `Questionnaire Wizard? (2)`, while preserving
+  both column values.
+- Parsing must tolerate embedded newlines, quoted cells, empty trailing columns,
+  and common Airtable CSV quirks.
+- File upload validation must enforce size, extension/content hints, encoding,
+  row/column limits, tenant ownership, authz, and rate limits.
+- Export by table/view must respect permissions, hidden fields, view filters,
+  and field visibility.
+- Defend against CSV formula injection by escaping dangerous
+  spreadsheet-leading characters on export.
+- Defer migration-grade import planning, relationship inference, background
+  jobs, append/replace/merge UX, and stateful import navigation to Phase 6.
+
+Required tests:
+
+- Uploaded Airtable CSV with duplicate headers preserves both columns and both
+  values.
+- Embedded newlines parse into the correct record count.
+- Basic import preview reports valid/invalid rows before write.
+- Basic import commit creates fields and records.
+- Invalid rows report before write.
+- Strict mode rolls back.
+- Partial mode reports skipped rows.
+- Export respects permissions, hidden fields, view visibility, and CSV
+  injection escaping.
+- `make pre-commit`.
+
+## Phase 5: Views, Query Engine, And Scale
+
+Branch: `phase-05-views-query-scale`
+
+PR title: `Phase 5: Add scalable views and query engine`
+
+Goal: make 90k+ row operational views usable.
+
+Engineering guidance:
+
+- Backend query service owns filter, sort, group, search, pagination, and
+  visible-field projection.
+- Frontend asks for a view page; it must not rebuild backend query behavior.
+- Use `ValueResolver` query values.
+- Add cursor pagination and hot-field indexing based on measured query paths.
+- Optimize measured hotspots, not imagined ones.
+- Hidden fields must not leak through query responses.
+
+Required tests:
+
+- 90k-row filtered view opens without loading all records.
+- Hidden fields do not leak.
+- Locked view blocks config edits.
+- Personal view is only owner-editable.
+- k6 read-heavy view test.
+- `make pre-commit`.
+
+## Phase 6: Migration-Grade Import UX And Table State
+
+Branch: `phase-06-import-migration-ux`
+
+PR title: `Phase 6: Add migration-grade import UX and table state`
+
+Goal: make Airtable migration usable as a product workflow, not merely a CSV
+parser. Imported operational tables must be readable, scrollable,
+URL-addressable, explainable, and recoverable.
 
 Research and migration notes:
 
@@ -231,12 +303,11 @@ Research and migration notes:
   sample preview, and an explicit create/update action.
 - Airtable supports adding new records to an existing table and merging into
   existing records by a selected unique field such as an ID or email. Tabular
-  should also add a third mode that Airtable does not make obvious enough:
-  replace the current table schema/data after a destructive preview and
-  rollback plan.
+  should also add a third explicit mode: replace the current table schema/data
+  after a destructive preview, import snapshot, and rollback plan.
 - Airtable documents import limits around CSV size and row count. Tabular's
   internal target is larger because the questionnaire migration has 90k+ rows
-  and ongoing weekly growth, so Phase 4 must use import jobs instead of doing
+  and ongoing weekly growth, so Phase 6 must use import jobs instead of doing
   large writes in a request/response UI path.
 - The real questionnaire export is a hard requirement, not a toy fixture: it
   has 52 parsed rows, 163 columns, embedded newlines, repeated customer names,
@@ -246,7 +317,7 @@ Research and migration notes:
 - Research on messy CSVs and spreadsheet relationalization shows that files in
   the wild often need dialect detection, semantic column profiling, and
   normalization suggestions before they become useful relational tables. Use
-  deterministic profiling first; reserve AI-assisted suggestions for Phase 10
+  deterministic profiling first; reserve AI-assisted suggestions for Phase 11
   after permissions, audit, and preview/approval are strong.
 
 Product guidance:
@@ -267,30 +338,53 @@ Product guidance:
 - If a user imports into a starter table containing fields like `Name`,
   `Notes`, and `Status`, Tabular must ask whether to append/map or replace the
   table. It must not silently append 163 imported columns after starter fields.
+- The imported table must become the active table after a successful create or
+  replace import, and the active table/view must be encoded in the URL or a
+  similarly durable route state. Refreshing the browser must return to the same
+  table and view, not fall back to the first table in the base.
+- Existing base URLs may continue to work, but deep links should support table
+  and view state, for example `/base/:baseId?table=:tableId&view=:viewId` or a
+  nested route. Pick the smallest route shape that fits Next.js and the current
+  codebase.
+- The grid must remain usable after a wide import:
+  - one clear scroll owner for the data viewport
+  - vertical scrolling through all loaded rows
+  - horizontal scrolling through all imported columns
+  - sticky field headers and row numbers
+  - visible row count/import batch status
+  - no clipped bottom rows because an outer wrapper uses `overflow-hidden`
+  - no layout expansion that pushes the scroll area beyond the viewport
 - After import commit, Tabular must reload the active view and show a report
   with row counts, field counts, skipped rows, warnings, and a `View imported
-  records` action. Hidden fields, filters, or pagination must never make a
-  successful import look empty.
+  records` action. Hidden fields, filters, pagination, or stale view state must
+  never make a successful import look empty.
 - Every import job should have an import batch ID/job ID so the user can filter
   imported records, inspect bad rows, retry a failed job, or roll back a recent
   import when the phase supports rollback.
 - Table names must be editable inline from the table tab/header, with server
   validation for blank names, duplicate sibling table names, length, and
   permissions.
+- Table deletion can be exposed only as a clear, confirmed action with current
+  coarse edit permission. Fine-grained admin policy, soft delete, retention,
+  restore, and audit hardening move to Phase 8.
 
 Engineering guidance:
 
-- Own this phase through an `ImportPlanner` and `ImportJobService`. The UI
-  should submit files/options and render plans/reports; it should not decide
-  field types, write records, dedupe customers, or create links.
+- Own this phase through an `ImportPlanner`, `ImportJobService`, and small
+  table-state helpers. The UI should submit files/options and render
+  plans/reports; it should not decide field types, write records, dedupe
+  customers, create links, or hand-roll route persistence.
 - Keep the import pipeline boring and testable:
   `parse -> profile -> infer -> map -> validate -> plan -> write -> report`.
-- Parsing must support duplicate headers by stable disambiguation, for example
-  `Questionnaire Wizard?` and `Questionnaire Wizard? (2)`, while preserving
-  both column values.
-- Parsing must tolerate embedded newlines, quoted cells, empty trailing columns,
-  common Airtable CSV quirks, and future dialect detection for delimiter/quote
-  variations.
+- Build route-state helpers for active table/view selection. `BaseView` should
+  not initialize active table only from `tables[0]` once durable route state
+  exists.
+- The grid scroll fix belongs at the layout boundary. Avoid sprinkling height
+  hacks in individual cells. The table workspace should define a constrained
+  viewport, and each view should own scroll behavior clearly.
+- Add imported-table navigation as a product contract: after create/replace,
+  update route state, select the imported table, load its default view, and
+  preserve that state across refresh/back/forward.
 - Field type inference must be header-aware and value-aware. Use confidence
   scores and reasons, then let the user override before commit.
 - Inference candidates must cover:
@@ -326,20 +420,12 @@ Engineering guidance:
   questionnaire back to its customer.
 - Preserve Airtable record IDs and source row numbers as metadata so parity
   checks, rollback, and audit can trace every migrated record.
-- Export must use the same value engine as imports and must defend against CSV
-  formula injection by escaping dangerous spreadsheet-leading characters when
-  exporting or previewing untrusted values.
-- File upload validation must enforce size, extension/content hints, encoding,
-  row/column limits, tenant ownership, authz, and rate limits. Never trust the
-  browser-provided MIME type as the only guard.
 - Large imports must run as background jobs with chunked writes, progress,
   cancellation, retry-safe idempotency, and a durable report. A request handler
   should enqueue work and return job status, not hold the full migration open.
 - Import write paths must be transactional per chunk and must produce a clear
   failure mode: strict rollback, partial commit with skipped-row report, or
   cancelled job.
-- Export by table/view must respect permissions, hidden fields, view filters,
-  and field visibility.
 - Include questionnaire-shaped fixtures for the real migration domain. Keep the
   fixture small enough for unit tests and add a larger synthetic fixture for
   load/import-job testing.
@@ -353,21 +439,16 @@ Engineering guidance:
 
 Required tests:
 
-- Uploaded Airtable CSV with duplicate headers preserves both columns and both
-  values.
-- Embedded newlines parse into the correct record count.
 - Import planner handles a 163-column questionnaire-shaped CSV without blocking
   the UI path.
-- `Create new table` creates fields, rows, and a readable default view.
+- `Create new table` creates fields, rows, a readable default view, and
+  navigates to the created table.
 - `Append to current table` maps existing fields and reports any created or
   skipped fields.
 - `Replace current table` removes starter fields like `Name`, `Notes`, and
   `Status` only after explicit confirmation and rolls back on write failure.
 - `Merge/update records` updates by selected key, creates unmatched rows, and
   reports duplicate/blank keys.
-- Invalid rows report before write.
-- Strict mode rolls back.
-- Partial mode reports skipped rows.
 - Field type inference returns confidence and reasons for dates, statuses,
   numbers, booleans, URLs, customer IDs, Salesforce IDs, and long text.
 - User overrides of inferred field types are honored by the write plan.
@@ -376,42 +457,22 @@ Required tests:
   approval.
 - Link cardinality matches source after normalized import.
 - Import report can filter or navigate to imported records.
-- Export respects permissions, hidden fields, view visibility, and CSV
-  injection escaping.
+- Imported wide table supports horizontal scrolling to the final imported field.
+- Imported table supports vertical scrolling through all loaded records without
+  clipped bottom rows.
+- Refresh, back, and forward preserve active table and active view.
+- Newly imported table remains selected after import commit and browser refresh.
+- Inline table rename updates UI, server state, route state, and sibling table
+  list without full-page confusion.
+- Table delete requires confirmation and removes the table from navigation
+  without leaving the base on a broken active table.
 - `make pre-commit`.
 
-## Phase 5: Views, Query Engine, And Scale
+## Phase 7: Forms And Capture
 
-Branch: `phase-05-views-query-scale`
+Branch: `phase-07-forms-capture`
 
-PR title: `Phase 5: Add scalable views and query engine`
-
-Goal: make 90k+ row operational views usable.
-
-Engineering guidance:
-
-- Backend query service owns filter, sort, group, search, pagination, and
-  visible-field projection.
-- Frontend asks for a view page; it must not rebuild backend query behavior.
-- Use `ValueResolver` query values.
-- Add cursor pagination and hot-field indexing based on measured query paths.
-- Optimize measured hotspots, not imagined ones.
-- Hidden fields must not leak through query responses.
-
-Required tests:
-
-- 90k-row filtered view opens without loading all records.
-- Hidden fields do not leak.
-- Locked view blocks config edits.
-- Personal view is only owner-editable.
-- k6 read-heavy view test.
-- `make pre-commit`.
-
-## Phase 6: Forms And Capture
-
-Branch: `phase-06-forms-capture`
-
-PR title: `Phase 6: Add forms and capture workflows`
+PR title: `Phase 7: Add forms and capture workflows`
 
 Goal: turn form view into a secure intake product.
 
@@ -435,11 +496,11 @@ Required tests:
 - Form trigger fires once.
 - `make pre-commit`.
 
-## Phase 7: Permissions, Collaboration, And Audit
+## Phase 8: Permissions, Collaboration, And Audit
 
-Branch: `phase-07-permissions-audit`
+Branch: `phase-08-permissions-audit`
 
-PR title: `Phase 7: Add permissions, collaboration, and audit`
+PR title: `Phase 8: Add permissions, collaboration, and audit`
 
 Goal: make access control trustworthy.
 
@@ -476,11 +537,11 @@ Required tests:
 - 300-user NAT/proxy rate-limit scenario is safe.
 - `make pre-commit`.
 
-## Phase 8: Automations Reliability
+## Phase 9: Automations Reliability
 
-Branch: `phase-08-automations-reliability`
+Branch: `phase-09-automations-reliability`
 
-PR title: `Phase 8: Harden automations reliability`
+PR title: `Phase 9: Harden automations reliability`
 
 Goal: make automations dependable for SLA and integration workflows.
 
@@ -503,11 +564,11 @@ Required tests:
 - Queue depth and run lag are visible.
 - `make pre-commit`.
 
-## Phase 9: Interfaces And App Builder
+## Phase 10: Interfaces And App Builder
 
-Branch: `phase-09-interfaces-app-builder`
+Branch: `phase-10-interfaces-app-builder`
 
-PR title: `Phase 9: Add interfaces and app builder`
+PR title: `Phase 10: Add interfaces and app builder`
 
 Goal: build role-specific apps on existing primitives.
 
@@ -528,11 +589,11 @@ Required tests:
 - Hidden and forbidden fields remain hidden.
 - `make pre-commit`.
 
-## Phase 10: Platform, Sync, And AI-Ready Core
+## Phase 11: Platform, Sync, And AI-Ready Core
 
-Branch: `phase-10-platform-ai-core`
+Branch: `phase-11-platform-ai-core`
 
-PR title: `Phase 10: Add platform, sync, and AI-ready core`
+PR title: `Phase 11: Add platform, sync, and AI-ready core`
 
 Goal: expose Tabular safely to external tools and AI-native workflows.
 
@@ -542,7 +603,7 @@ Engineering guidance:
   as a superuser.
 - AI mutations require preview and approval.
 - AI/API/MCP actions must be audit logged.
-- AI-assisted import/schema work must consume the Phase 4 import planner. It
+- AI-assisted import/schema work must consume the Phase 6 import planner. It
   may propose field types, table splits, links, formulas, views, and cleanup
   rules, but it must return an editable plan and never write directly.
 - AI should explain uncertainty and ask for approval on destructive or
