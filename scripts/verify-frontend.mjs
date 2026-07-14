@@ -264,6 +264,18 @@ async function main() {
     body = await page.evaluate(() => document.body.innerText);
     check("grid shows both linked names", body.includes("Ref One") && body.includes("Ref Two"));
 
+    // server-side view search: the toolbar input should narrow the active view
+    // through /api/views/:viewId/records, then recover when cleared.
+    await page.click('input[placeholder="Search records"]');
+    await page.type('input[placeholder="Search records"]', "bravo");
+    await page.waitForFunction(() => document.body.innerText.includes("bravo"), { timeout: 4000 }).catch(() => {});
+    let searchBody = await page.evaluate(() => document.body.innerText);
+    check("toolbar search narrows records", searchBody.includes("bravo") && !searchBody.includes("paste-name"));
+    await page.click('button[aria-label="Clear search"]');
+    await page.waitForFunction(() => document.body.innerText.includes("paste-name"), { timeout: 4000 }).catch(() => {});
+    searchBody = await page.evaluate(() => document.body.innerText);
+    check("clearing toolbar search reloads full view", searchBody.includes("paste-name") && searchBody.includes("bravo"));
+
     // toolbar popovers
     for (const label of ["Filter", "Sort", "Group", "Import / Export"]) {
       await page.evaluate((l) => {
@@ -418,19 +430,19 @@ async function main() {
     await sleep(300);
 
     // view types
-    for (const [type, label, marker] of [["kanban", "Kanban", "Uncategorized"], ["gallery", "Gallery", "alpha"], ["calendar", "Calendar", "2026"]]) {
+    for (const [type, label, marker] of [["list", "List", "paste-name"], ["kanban", "Kanban", "Uncategorized"], ["gallery", "Gallery", "paste-name"], ["calendar", "Calendar", "20"]]) {
       const v = await api(j, "POST", `/api/tables/${tableId}/views`, { name: `${label} v`, type });
       void v;
     }
     await page.reload({ waitUntil: "networkidle0" }); await sleep(1500);
-    for (const [label, marker] of [["Kanban", "Uncategorized"], ["Gallery", "alpha"], ["Calendar", "20"]]) {
+    for (const [label, marker] of [["List", "paste-name"], ["Kanban", "Uncategorized"], ["Gallery", "paste-name"], ["Calendar", "20"]]) {
       await page.evaluate((l) => {
         const b = [...document.querySelectorAll("button")].find((x) => x.textContent.includes(l + " v"));
         b && b.click();
       }, label);
       await sleep(1200);
       const txt = await page.evaluate(() => document.body.innerText);
-      check(`${label} view renders`, txt.length > 0, "empty body");
+      check(`${label} view renders`, txt.includes(marker), txt.slice(0, 180));
     }
 
     /* ---- form view: fill + submit creates a record ---- */

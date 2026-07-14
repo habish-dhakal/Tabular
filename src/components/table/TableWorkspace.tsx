@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Table2, Kanban, CalendarDays, LayoutGrid, FileText, Plus, Trash2 } from "lucide-react";
+import { Loader2, Table2, Kanban, CalendarDays, LayoutGrid, FileText, Plus, Trash2, List } from "lucide-react";
 import { TableProvider, useTable } from "@/components/table/TableProvider";
 import { Toolbar } from "@/components/table/Toolbar";
 import { Popover } from "@/components/ui/Popover";
@@ -9,6 +9,7 @@ import { AutomationsProvider } from "@/components/automations/AutomationsProvide
 import { AutomationsButton } from "@/components/automations/AutomationsButton";
 import { AutomationsPanel } from "@/components/automations/AutomationsPanel";
 import { GridView } from "@/components/table/views/GridView";
+import { ListView } from "@/components/table/views/ListView";
 import { KanbanView } from "@/components/table/views/KanbanView";
 import { CalendarView } from "@/components/table/views/CalendarView";
 import { GalleryView } from "@/components/table/views/GalleryView";
@@ -17,6 +18,7 @@ import type { ViewType } from "@/server/db/schema";
 
 const VIEW_META: Record<ViewType, { icon: typeof Table2; label: string }> = {
   grid: { icon: Table2, label: "Grid" },
+  list: { icon: List, label: "List" },
   kanban: { icon: Kanban, label: "Kanban" },
   calendar: { icon: CalendarDays, label: "Calendar" },
   gallery: { icon: LayoutGrid, label: "Gallery" },
@@ -96,6 +98,7 @@ function ActiveView() {
   }
   if (!activeView) return <div className="flex h-full items-center justify-center text-muted">No view.</div>;
   switch (activeView.type) {
+    case "list": return <ListView />;
     case "kanban": return <KanbanView />;
     case "calendar": return <CalendarView />;
     case "gallery": return <GalleryView />;

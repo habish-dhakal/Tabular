@@ -5,13 +5,12 @@ import { Plus } from "lucide-react";
 import { useTable } from "@/components/table/TableProvider";
 import { RecordCard } from "@/components/table/RecordCard";
 import { RecordModal } from "@/components/table/RecordModal";
-import { applyFilterSort } from "@/lib/query";
 import type { RecordDTO } from "@/lib/types";
 
 export function GalleryView() {
   const { fields, records, config, addRecord } = useTable();
   const [open, setOpen] = useState<RecordDTO | null>(null);
-  const rows = useMemo(() => applyFilterSort(records, fields, config), [records, fields, config]);
+  const rows = records;
 
   return (
     <div className="thin-scroll h-full overflow-auto bg-surface p-4">

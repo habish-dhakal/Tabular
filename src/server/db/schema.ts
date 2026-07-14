@@ -199,7 +199,7 @@ export const fields = pgTable(
 );
 
 /* ---- Views ------------------------------------------------------- */
-export const viewTypes = ["grid", "kanban", "calendar", "gallery", "form"] as const;
+export const viewTypes = ["grid", "list", "kanban", "calendar", "gallery", "form"] as const;
 export type ViewType = (typeof viewTypes)[number];
 
 /**
@@ -211,6 +211,7 @@ export type ViewType = (typeof viewTypes)[number];
  *  fieldOrder: string[]
  *  fieldWidths: Record<fieldId, number>
  *  rowHeight: "short"|"medium"|"tall"
+ *  visibility:"collaborative"|"personal"; ownerId; locked; favorite; section
  *  kanban:   { stackFieldId }
  *  calendar: { dateFieldId }
  */

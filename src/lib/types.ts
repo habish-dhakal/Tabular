@@ -51,6 +51,12 @@ export interface ViewConfig {
   fieldOrder?: string[];
   fieldWidths?: Record<string, number>;
   rowHeight?: "short" | "medium" | "tall";
+  search?: string;
+  visibility?: "collaborative" | "personal";
+  ownerId?: string;
+  locked?: boolean;
+  favorite?: boolean;
+  section?: string | null;
   stackFieldId?: string | null; // kanban
   dateFieldId?: string | null; // calendar
   coverFieldId?: string | null; // gallery

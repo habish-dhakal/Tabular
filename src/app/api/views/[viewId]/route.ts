@@ -25,7 +25,7 @@ export async function PATCH(req: Request, { params }: Params) {
     const tableId = await requireTableId(viewId);
     await assertTableAccess(userId, tableId, true);
     const patch = patchBody.parse(await req.json());
-    return updateView(viewId, patch);
+    return updateView(viewId, patch, userId);
   });
 }
 

@@ -10,7 +10,7 @@ export async function GET(_req: Request, { params }: Params) {
     const userId = await requireUserId();
     const { tableId } = await params;
     await assertTableAccess(userId, tableId);
-    const bundle = await getTableBundle(tableId);
+    const bundle = await getTableBundle(tableId, userId);
     if (!bundle) throw new AccessError(404, "Table not found");
     return bundle;
   });

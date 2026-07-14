@@ -5,7 +5,6 @@ import { Plus } from "lucide-react";
 import { useTable } from "@/components/table/TableProvider";
 import { RecordCard } from "@/components/table/RecordCard";
 import { RecordModal } from "@/components/table/RecordModal";
-import { applyFilterSort } from "@/lib/query";
 import type { SelectChoice } from "@/lib/fields";
 import type { RecordDTO } from "@/lib/types";
 
@@ -20,7 +19,7 @@ export function KanbanView() {
   const stackFieldId = config.stackFieldId ?? selectFields[0]?.id ?? null;
   const stackField = fields.find((f) => f.id === stackFieldId);
 
-  const rows = useMemo(() => applyFilterSort(records, fields, config), [records, fields, config]);
+  const rows = records;
 
   const columns = useMemo(() => {
     if (!stackField) return [];

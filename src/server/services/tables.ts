@@ -1,6 +1,7 @@
 import { asc, eq, sql } from "drizzle-orm";
 import { db } from "@/server/db";
 import { fields, records, tables, views } from "@/server/db/schema";
+import { listViews } from "@/server/services/views";
 
 /** Create a table with a sensible default schema: a primary text field,
  *  a couple of starter fields, a grid view, and 3 empty rows. */
@@ -53,12 +54,12 @@ export async function listTables(baseId: string) {
 }
 
 /** Full payload the grid needs: table meta, its fields, and its views. */
-export async function getTableBundle(tableId: string) {
+export async function getTableBundle(tableId: string, userId?: string) {
   const table = await db.query.tables.findFirst({ where: eq(tables.id, tableId) });
   if (!table) return null;
   const [fieldList, viewList] = await Promise.all([
     db.query.fields.findMany({ where: eq(fields.tableId, tableId), orderBy: asc(fields.position) }),
-    db.query.views.findMany({ where: eq(views.tableId, tableId), orderBy: asc(views.position) }),
+    listViews(tableId, userId),
   ]);
   return { table, fields: fieldList, views: viewList };
 }

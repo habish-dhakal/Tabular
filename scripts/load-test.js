@@ -1,12 +1,15 @@
 // Load test — Tabular. Run against a PRODUCTION build, never `next dev`.
 //
-//   npm run build && PORT=3100 npm run start   # in one terminal
+//   npm run build
+//   AUTH_URL=http://localhost:3100 ALLOW_DEV_LOGIN=1 RATE_LIMIT_MAX=200000 PORT=3100 npm run start
 //   npm run worker                             # in another (automations under load)
-//   k6 run scripts/load-test.js                # ramps to 300 virtual users
+//   BASE_URL=http://localhost:3100 k6 run scripts/load-test.js
 //
-// Simulates one busy workspace: all VUs share a load user and hammer one table
+// Simulates one busy workspace: all VUs share a load user and hammer one view
 // with an 80% read / 20% write mix. Fails the run if error rate or p95 latency
-// breach the thresholds below.
+// breach the thresholds below. The elevated RATE_LIMIT_MAX is intentional for
+// local load tests because all VUs come from one client IP; Phase 7 replaces
+// client-IP-only limiting with user/workspace/base/action policies.
 import http from "k6/http";
 import { check, sleep } from "k6";
 
@@ -28,15 +31,22 @@ export const options = {
   },
 };
 
+const jsonHeaders = { "content-type": "application/json" };
+const formHeaders = { "content-type": "application/x-www-form-urlencoded" };
+
+function req(name, headers = {}) {
+  return { headers, tags: { name } };
+}
+
 // dev Credentials provider: GET csrf, then POST the callback (form-encoded).
 // k6 resets the cookie jar between iterations, so after logging in we snapshot
 // the resulting cookies into a header string and resend it on every request.
 function login() {
-  const csrf = http.get(`${BASE}/api/auth/csrf`).json("csrfToken");
+  const csrf = http.get(`${BASE}/api/auth/csrf`, req("GET /api/auth/csrf")).json("csrfToken");
   const res = http.post(
     `${BASE}/api/auth/callback/dev`,
     { csrfToken: csrf, email: EMAIL, json: "true" },
-    { headers: { "content-type": "application/x-www-form-urlencoded" } }
+    req("POST /api/auth/callback/dev", formHeaders)
   );
   check(res, { "login ok": (r) => r.status === 200 || r.status === 302 });
   const jar = http.cookieJar().cookiesForURL(BASE);
@@ -48,17 +58,17 @@ function login() {
 // setup() runs once: log in, build a base + table + fields, seed rows.
 export function setup() {
   login();
-  const wsId = http.get(`${BASE}/api/workspaces`).json("workspaces.0.id");
+  const wsId = http.get(`${BASE}/api/workspaces`, req("GET /api/workspaces")).json("workspaces.0.id");
   const baseId = http
     .post(`${BASE}/api/workspaces/${wsId}/bases`, JSON.stringify({ name: "LoadTest" }), {
-      headers: { "content-type": "application/json" },
+      ...req("POST /api/workspaces/:workspaceId/bases", jsonHeaders),
     })
     .json("id");
   // POST /tables nests the row under `table` and returns the auto-created
   // primary field id; reuse it rather than adding a second field.
   const tbl = http
     .post(`${BASE}/api/bases/${baseId}/tables`, JSON.stringify({ name: "Load" }), {
-      headers: { "content-type": "application/json" },
+      ...req("POST /api/bases/:baseId/tables", jsonHeaders),
     })
     .json();
   const tableId = tbl.table.id;
@@ -67,36 +77,43 @@ export function setup() {
     http.post(
       `${BASE}/api/tables/${tableId}/records`,
       JSON.stringify({ cells: { [fieldId]: `seed ${i}` } }),
-      { headers: { "content-type": "application/json" } }
+      req("POST /api/tables/:tableId/records", jsonHeaders)
     );
   }
-  return { baseId, tableId, fieldId };
+  return { baseId, tableId, fieldId, viewId: tbl.viewId };
 }
 
 // One iteration per VU. Log in once per VU, cache the cookie header, reuse it.
 let cookie = null;
 export default function (data) {
   if (!cookie) cookie = login();
-  const read = { headers: { cookie } };
-  const write = { headers: { cookie, "content-type": "application/json" } };
+  const readHeaders = { cookie };
+  const writeHeaders = { cookie, ...jsonHeaders };
 
-  // 80% read: list the table's records (the hot path for the grid)
-  const list = http.get(`${BASE}/api/tables/${data.tableId}/records`, read);
-  check(list, { "list 200": (r) => r.status === 200 });
+  // 80% read: page the active view (the hot path for grid/list views)
+  const page = http.get(
+    `${BASE}/api/views/${data.viewId}/records?limit=200&includeTotal=true`,
+    req("GET /api/views/:viewId/records", readHeaders)
+  );
+  const pageRows = page.status === 200 ? page.json("records") : [];
+  check(page, {
+    "view page 200": (r) => r.status === 200,
+    "view page is bounded": () => Array.isArray(pageRows) && pageRows.length <= 200,
+  });
 
   // 20% write: create then patch a record
   if (Math.random() < 0.2) {
     const rec = http.post(
       `${BASE}/api/tables/${data.tableId}/records`,
       JSON.stringify({ cells: { [data.fieldId]: `vu${__VU}-${Date.now()}` } }),
-      write
+      req("POST /api/tables/:tableId/records", writeHeaders)
     );
     if (rec.status === 200) {
       const id = rec.json("id");
       http.patch(
         `${BASE}/api/records/${id}`,
         JSON.stringify({ cells: { [data.fieldId]: "edited" } }),
-        write
+        req("PATCH /api/records/:recordId", writeHeaders)
       );
     }
   }
@@ -106,5 +123,5 @@ export default function (data) {
 // teardown() runs once at the end: delete the test base so demo data stays clean.
 export function teardown(data) {
   login();
-  http.del(`${BASE}/api/bases/${data.baseId}`);
+  http.del(`${BASE}/api/bases/${data.baseId}`, null, req("DELETE /api/bases/:baseId"));
 }

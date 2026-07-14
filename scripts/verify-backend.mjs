@@ -285,6 +285,66 @@ async function main() {
   check("cannot delete the last view",
     (await s.req("DELETE", `/api/views/${gridView.id}`)).status === 400);
 
+  /* ---- server-side view query, pagination, search, and metadata ---- */
+  const scaleTable = await s.req("POST", `/api/bases/${baseId}/tables`, { name: "View Scale" });
+  check("create scale query table", scaleTable.status === 200 && scaleTable.json.table?.id);
+  const scaleTableId = scaleTable.json.table.id;
+  const scaleBundle = await s.req("GET", `/api/tables/${scaleTableId}`);
+  const scalePrimary = scaleBundle.json.fields.find((f) => f.isPrimary);
+  const scaleGrid = scaleBundle.json.views.find((v) => v.type === "grid");
+  const scaleScore = await s.req("POST", `/api/tables/${scaleTableId}/fields`, { name: "Score", type: "number" });
+  const scaleSecret = await s.req("POST", `/api/tables/${scaleTableId}/fields`, { name: "Secret", type: "singleLineText" });
+  check("create scale query fields", scaleScore.status === 200 && scaleSecret.status === 200, JSON.stringify({ score: scaleScore.json, secret: scaleSecret.json }));
+  for (let i = 0; i < 12; i++) {
+    await s.req("POST", `/api/tables/${scaleTableId}/records`, {
+      cells: {
+        [scalePrimary.id]: i === 9 ? "needle questionnaire" : `task ${i}`,
+        [scaleScore.json.id]: i,
+        [scaleSecret.json.id]: `hidden-${i}`,
+      },
+    });
+  }
+  const scaleConfig = {
+    hiddenFieldIds: [scaleSecret.json.id],
+    filters: { conjunction: "and", conditions: [{ id: "score", fieldId: scaleScore.json.id, op: "gt", value: 5 }] },
+    sorts: [{ fieldId: scaleScore.json.id, direction: "desc" }],
+  };
+  check("configure scale query view", (await s.req("PATCH", `/api/views/${scaleGrid.id}`, { config: scaleConfig })).status === 200);
+  const firstPage = await s.req("GET", `/api/views/${scaleGrid.id}/records?limit=5`);
+  check("view query returns a bounded page",
+    firstPage.status === 200 && firstPage.json.records.length === 5 && firstPage.json.hasMore === true && firstPage.json.total >= 6,
+    JSON.stringify(firstPage.json));
+  check("view query projects hidden cells out of payload",
+    firstPage.json.records.every((record) => !(scaleSecret.json.id in (record.cells ?? {}))),
+    JSON.stringify(firstPage.json.records[0]?.cells));
+  check("view query applies server-side filter and sort",
+    firstPage.json.records.every((record) => record.cells[scaleScore.json.id] > 5) &&
+      firstPage.json.records[0].cells[scaleScore.json.id] > firstPage.json.records[1].cells[scaleScore.json.id],
+    JSON.stringify(firstPage.json.records.map((record) => record.cells[scaleScore.json.id])));
+  const secondPage = await s.req("GET", `/api/views/${scaleGrid.id}/records?limit=5&cursor=${encodeURIComponent(firstPage.json.nextCursor)}`);
+  const firstIds = new Set(firstPage.json.records.map((record) => record.id));
+  check("view query cursor continues without duplicate rows",
+    secondPage.status === 200 && secondPage.json.records.every((record) => !firstIds.has(record.id)),
+    JSON.stringify(secondPage.json.records.map((record) => record.id)));
+  const searchedPage = await s.req("GET", `/api/views/${scaleGrid.id}/records?limit=10&search=needle`);
+  check("view query search runs through the view records endpoint",
+    searchedPage.status === 200 && searchedPage.json.records.length === 1 && searchedPage.json.records[0].cells[scalePrimary.id] === "needle questionnaire",
+    JSON.stringify(searchedPage.json));
+  const listView = await s.req("POST", `/api/tables/${scaleTableId}/views`, { name: "Work list", type: "list" });
+  check("create list view", listView.status === 200 && listView.json.type === "list", JSON.stringify(listView.json));
+  const personalView = await s.req("POST", `/api/tables/${scaleTableId}/views`, {
+    name: "My queue",
+    type: "grid",
+    config: { visibility: "personal" },
+  });
+  const meForView = (await s.req("GET", `/api/tables/${scaleTableId}/members`)).json?.[0]?.id;
+  check("personal view is stamped with current user",
+    personalView.status === 200 && personalView.json.config?.visibility === "personal" && personalView.json.config?.ownerId === meForView,
+    JSON.stringify(personalView.json?.config));
+  check("lock view", (await s.req("PATCH", `/api/views/${listView.json.id}`, { config: { locked: true } })).status === 200);
+  check("locked view rejects config edits",
+    (await s.req("PATCH", `/api/views/${listView.json.id}`, { config: { rowHeight: "tall" } })).status === 400);
+
   /* ---- import/export ---- */
   const importTable = await s.req("POST", `/api/bases/${baseId}/tables`, { name: "Import Ops" });
   check("create import test table", importTable.status === 200 && importTable.json.table?.id);

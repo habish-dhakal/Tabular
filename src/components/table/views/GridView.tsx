@@ -12,7 +12,7 @@ import { CellPopover } from "@/components/cell-editors/CellPopover";
 import { LinkPicker, type LinkChip } from "@/components/cell-editors/LinkPicker";
 import { CellDisplay, CellEditor } from "@/components/Cell";
 import { FIELD_TYPE_META, isComputed, type SelectChoice } from "@/lib/fields";
-import { applyFilterSort, groupRecords } from "@/lib/query";
+import { groupRecords } from "@/lib/query";
 import { computeCellValue } from "@/lib/compute";
 import {
   EMPTY_HISTORY,
@@ -60,6 +60,7 @@ function orderFieldsForView(fields: FieldDTO[], order: string[] | undefined): Fi
 export function GridView() {
   const {
     fields, records, config, updateConfig, commitCells, addRecord, deleteRecord, addField, setRecordLinks,
+    hasMoreRecords, loadMoreRecords, recordLoading, recordTotal, viewQueryWarning,
   } = useTable();
   const parentRef = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState<{ recordId: string; fieldId: string; rect?: DOMRect } | null>(null);
@@ -88,7 +89,7 @@ export function GridView() {
 
   const groupField = config.groupBy ? fields.find((f) => f.id === config.groupBy) : undefined;
 
-  const rows = useMemo(() => applyFilterSort(records, fields, config), [records, fields, config]);
+  const rows = records;
   const rowIndexById = useMemo(() => new Map(rows.map((r, i) => [r.id, i])), [rows]);
 
   const items = useMemo<Item[]>(() => {
@@ -329,6 +330,11 @@ export function GridView() {
       className="thin-scroll h-full overflow-auto bg-background outline-none"
     >
       <div style={{ width: totalWidth }} className="relative">
+        {viewQueryWarning && (
+          <div className="sticky top-0 z-30 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            {viewQueryWarning}
+          </div>
+        )}
         {/* Header */}
         <div className="sticky top-0 z-20 flex border-b border-border-token bg-surface" style={{ height: HEADER_H }}>
           <div className="flex items-center justify-center border-r border-border-token text-xs text-muted" style={{ width: GUTTER_W }}>#</div>
@@ -465,6 +471,20 @@ export function GridView() {
         <button onClick={() => addRecord()} className="flex h-9 items-center gap-1.5 border-b border-border-token px-3 text-sm text-muted hover:bg-surface" style={{ width: totalWidth }}>
           <Plus size={15} /> Add row
         </button>
+        {hasMoreRecords ? (
+          <button
+            onClick={() => loadMoreRecords()}
+            disabled={recordLoading}
+            className="flex h-9 items-center justify-center border-b border-border-token text-sm text-muted hover:bg-surface disabled:opacity-50"
+            style={{ width: totalWidth }}
+          >
+            {recordLoading ? "Loading..." : "Load more rows"}
+          </button>
+        ) : (
+          <div className="flex h-8 items-center justify-center border-b border-border-token text-xs text-muted" style={{ width: totalWidth }}>
+            {recordTotal == null ? records.length : recordTotal} rows
+          </div>
+        )}
       </div>
 
       {notice && (

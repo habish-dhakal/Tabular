@@ -124,8 +124,10 @@ export class ValueResolver {
   }
 
   computedValue(field: FieldDTO, record: RecordDTO, seen: Set<string> = new Set()): unknown {
+    const hasProjectedValue = Object.prototype.hasOwnProperty.call(record.cells, field.id);
     switch (field.type) {
       case "formula": {
+        if (hasProjectedValue) return record.cells[field.id];
         const expr = (field.options.expression as string) ?? "";
         if (!expr.trim()) return null;
         if (seen.has(field.id)) return "#CYCLE";
@@ -156,6 +158,7 @@ export class ValueResolver {
       case "rollup":
         return record.cells[field.id];
       case "count": {
+        if (hasProjectedValue) return record.cells[field.id];
         const linkFieldId = field.options.linkFieldId as string | undefined;
         const linked = linkFieldId ? record.cells[linkFieldId] : undefined;
         return Array.isArray(linked) ? linked.length : 0;

@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  EyeOff, Eye, Filter, ArrowUpDown, Group, ChevronUp, ChevronDown, Plus, X, Rows3,
+  EyeOff, Eye, Filter, ArrowUpDown, Group, ChevronUp, ChevronDown, Plus, X, Rows3, Search,
 } from "lucide-react";
 import { Popover } from "@/components/ui/Popover";
 import { useTable } from "@/components/table/TableProvider";
@@ -217,6 +217,7 @@ function RowHeightMenu() {
 }
 
 export function Toolbar({ type }: { type: string }) {
+  const { viewSearch, setViewSearch, recordTotal, recordsLoaded, recordLoading, viewQueryMode } = useTable();
   return (
     <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border-token bg-background px-2">
       <FieldsMenu />
@@ -224,6 +225,29 @@ export function Toolbar({ type }: { type: string }) {
       <SortMenu />
       {type === "grid" && <GroupMenu />}
       {type === "grid" && <RowHeightMenu />}
+      <div className="ml-2 flex h-7 min-w-64 items-center gap-1.5 rounded-md border border-border-token px-2 text-sm">
+        <Search size={14} className="text-muted" />
+        <input
+          value={viewSearch}
+          onChange={(e) => setViewSearch(e.target.value)}
+          placeholder="Search records"
+          className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted"
+        />
+        {viewSearch && (
+          <button
+            type="button"
+            aria-label="Clear search"
+            onClick={() => setViewSearch("")}
+            className="text-muted hover:text-foreground"
+          >
+            <X size={13} />
+          </button>
+        )}
+      </div>
+      <span className="hidden text-xs text-muted lg:inline">
+        {recordLoading ? "Loading..." : `${recordsLoaded}${recordTotal == null ? "" : `/${recordTotal}`} rows`}
+        {viewQueryMode === "materialized" ? " · fallback" : ""}
+      </span>
       <div className="ml-auto">
         <ImportExportMenu />
       </div>

@@ -17,6 +17,7 @@ import { bases, fields, recordLinks, records, tables, views, type FieldType } fr
 import { createField, deleteField } from "@/server/services/fields";
 import { createRecord, listRecords } from "@/server/services/records";
 import { enrichRecords } from "@/server/services/links";
+import { toRecordDTO } from "@/server/services/record-dto";
 
 export interface CsvImportRequest {
   csv: string;
@@ -38,7 +39,6 @@ export interface CsvImportCommitReport {
 }
 
 const IMPORT_BATCH_SIZE = 500;
-type RecordRow = typeof records.$inferSelect;
 
 export async function previewCsvImport(tableId: string, request: CsvImportRequest): Promise<CsvImportPlan> {
   const parsed = parseCsv(request.csv);
@@ -133,14 +133,6 @@ function chunk<T>(items: T[], size: number): T[][] {
 
 function translateTempFieldIds(cells: Record<string, unknown>, tempToFieldId: Map<string, string>) {
   return Object.fromEntries(Object.entries(cells).map(([fieldId, value]) => [tempToFieldId.get(fieldId) ?? fieldId, value]));
-}
-
-function toRecordDTO(record: RecordRow): RecordDTO {
-  return {
-    ...record,
-    createdAt: record.createdAt.toISOString(),
-    updatedAt: record.updatedAt.toISOString(),
-  };
 }
 
 async function rollbackImport(createdFields: FieldDTO[], insertedRecordIds: string[]) {

@@ -14,6 +14,7 @@ import type { LinkChip } from "@/components/cell-editors/LinkPicker";
 import type { FieldType, ViewType } from "@/server/db/schema";
 import { FIELD_TYPE_META } from "@/lib/fields";
 import type { CellPatch } from "@/lib/grid-state";
+import type { ViewQueryMode, ViewRecordPage } from "@/lib/view-query";
 import { useDialog } from "@/components/ui/DialogProvider";
 
 interface TableCtx {
@@ -21,6 +22,15 @@ interface TableCtx {
   table: TableBundle["table"] | null;
   fields: FieldDTO[];
   records: RecordDTO[];
+  recordLoading: boolean;
+  recordTotal: number | null;
+  recordsLoaded: number;
+  hasMoreRecords: boolean;
+  viewQueryMode: ViewQueryMode | null;
+  viewQueryWarning: string | null;
+  viewSearch: string;
+  setViewSearch: (search: string) => void;
+  loadMoreRecords: () => Promise<void>;
   views: ViewDTO[];
   activeView: ViewDTO | null;
   setActiveViewId: (id: string) => void;
@@ -58,6 +68,14 @@ export function TableProvider({ tableId, children }: { tableId: string; children
   const [table, setTable] = useState<TableBundle["table"] | null>(null);
   const [fields, setFields] = useState<FieldDTO[]>([]);
   const [records, setRecords] = useState<RecordDTO[]>([]);
+  const [recordLoading, setRecordLoading] = useState(false);
+  const [recordTotal, setRecordTotal] = useState<number | null>(null);
+  const [recordsLoaded, setRecordsLoaded] = useState(0);
+  const [hasMoreRecords, setHasMoreRecords] = useState(false);
+  const [nextRecordCursor, setNextRecordCursor] = useState<string | null>(null);
+  const [viewQueryMode, setViewQueryMode] = useState<ViewQueryMode | null>(null);
+  const [viewQueryWarning, setViewQueryWarning] = useState<string | null>(null);
+  const [viewSearch, setViewSearch] = useState("");
   const [views, setViews] = useState<ViewDTO[]>([]);
   const [tables, setTables] = useState<TableDTO[]>([]);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
@@ -65,16 +83,12 @@ export function TableProvider({ tableId, children }: { tableId: string; children
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    Promise.all([
-      fetch(`/api/tables/${tableId}`).then((r) => r.json()),
-      fetch(`/api/tables/${tableId}/records`).then((r) => r.json()),
-    ]).then(([bundle, recs]: [TableBundle, { records: RecordDTO[] }]) => {
+    fetch(`/api/tables/${tableId}`).then((r) => r.json()).then((bundle: TableBundle) => {
       if (!alive) return;
       setTable(bundle.table);
       setFields([...bundle.fields].sort((a, b) => a.position - b.position));
       setViews(bundle.views);
       setActiveViewId(bundle.views[0]?.id ?? null);
-      setRecords(recs.records ?? []);
       setLoading(false);
       // Sibling tables in the base — used as link targets.
       fetch(`/api/bases/${bundle.table.baseId}/tables`)
@@ -92,16 +106,56 @@ export function TableProvider({ tableId, children }: { tableId: string; children
   );
   const config = activeView?.config ?? {};
 
+  const fetchViewRecords = useCallback(async (
+    viewId: string,
+    options: { append?: boolean; cursor?: string | null; search?: string } = {}
+  ) => {
+    setRecordLoading(true);
+    const params = new URLSearchParams({
+      limit: "500",
+      includeTotal: "true",
+    });
+    const search = options.search ?? viewSearch;
+    if (search) params.set("search", search);
+    if (options.cursor) params.set("cursor", options.cursor);
+    try {
+      const page: ViewRecordPage = await fetch(`/api/views/${viewId}/records?${params.toString()}`).then((r) => r.json());
+      setRecords((prev) => options.append ? [...prev, ...(page.records ?? [])] : page.records ?? []);
+      setRecordTotal(page.total);
+      setRecordsLoaded((prev) => options.append ? prev + (page.records?.length ?? 0) : page.records?.length ?? 0);
+      setHasMoreRecords(page.hasMore);
+      setNextRecordCursor(page.nextCursor);
+      setViewQueryMode(page.mode);
+      setViewQueryWarning(page.warning ?? null);
+    } finally {
+      setRecordLoading(false);
+    }
+  }, [viewSearch]);
+
   const reloadRecords = useCallback(async () => {
-    const recs = await fetch(`/api/tables/${tableId}/records`).then((r) => r.json());
-    setRecords(recs.records ?? []);
-  }, [tableId]);
+    if (!activeViewId) {
+      setRecords([]);
+      setRecordTotal(null);
+      setRecordsLoaded(0);
+      setHasMoreRecords(false);
+      setNextRecordCursor(null);
+      return;
+    }
+    await fetchViewRecords(activeViewId, { search: viewSearch });
+  }, [activeViewId, fetchViewRecords, viewSearch]);
+
+  const loadMoreRecords = useCallback(async () => {
+    if (!activeViewId || !nextRecordCursor || recordLoading) return;
+    await fetchViewRecords(activeViewId, { append: true, cursor: nextRecordCursor, search: viewSearch });
+  }, [activeViewId, fetchViewRecords, nextRecordCursor, recordLoading, viewSearch]);
+
+  useEffect(() => {
+    if (!activeViewId) return;
+    void fetchViewRecords(activeViewId, { search: viewSearch });
+  }, [activeViewId, fetchViewRecords, viewSearch]);
 
   const reloadTable = useCallback(async () => {
-    const [bundle, recs]: [TableBundle, { records: RecordDTO[] }] = await Promise.all([
-      fetch(`/api/tables/${tableId}`).then((r) => r.json()),
-      fetch(`/api/tables/${tableId}/records`).then((r) => r.json()),
-    ]);
+    const bundle: TableBundle = await fetch(`/api/tables/${tableId}`).then((r) => r.json());
     setTable(bundle.table);
     setFields([...bundle.fields].sort((a, b) => a.position - b.position));
     setViews(bundle.views);
@@ -110,7 +164,6 @@ export function TableProvider({ tableId, children }: { tableId: string; children
         ? current
         : bundle.views[0]?.id ?? null
     );
-    setRecords(recs.records ?? []);
     const siblings = await fetch(`/api/bases/${bundle.table.baseId}/tables`).then((r) => r.json());
     setTables(siblings.tables ?? []);
     setLoading(false);
@@ -132,10 +185,18 @@ export function TableProvider({ tableId, children }: { tableId: string; children
           method: "PATCH",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ config: next }),
+        }).then((res) => {
+          if (!res.ok) return res.json().then((body) => {
+            throw new Error(body.error ?? "View update failed");
+          });
+          if (activeView.id === viewId) void fetchViewRecords(viewId, { search: viewSearch });
+        }).catch((err) => {
+          void dialog.alert({ title: "View update rejected", message: err instanceof Error ? err.message : "Failed" });
+          void reloadTable();
         });
       }, 400);
     },
-    [activeView]
+    [activeView, dialog, fetchViewRecords, reloadTable, viewSearch]
   );
 
   /* ---- record mutations ---- */
@@ -159,8 +220,7 @@ export function TableProvider({ tableId, children }: { tableId: string; children
       body: JSON.stringify({ cells: { [fieldId]: valueForPayload(value) } }),
     });
     if (res.ok) {
-      const updated: RecordDTO = await res.json();
-      setRecords((prev) => prev.map((r) => (r.id === recordId ? updated : r)));
+      await reloadRecords();
     } else {
       const { error } = await res.json().catch(() => ({ error: "Failed" }));
       await reloadRecords();
@@ -203,6 +263,7 @@ export function TableProvider({ tableId, children }: { tableId: string; children
       setRecords((prev) =>
         prev.map((record) => updated.find((next) => next?.id === record.id) ?? record)
       );
+      await reloadRecords();
     } catch (err) {
       await reloadRecords();
       void dialog.alert({ title: "Cell update rejected", message: err instanceof Error ? err.message : "Failed" });
@@ -222,7 +283,7 @@ export function TableProvider({ tableId, children }: { tableId: string; children
         return null;
       }
       const rec: RecordDTO = await res.json();
-      setRecords((prev) => [...prev, rec]);
+      await reloadRecords();
       return rec;
     },
     [dialog, tableId]
@@ -230,6 +291,8 @@ export function TableProvider({ tableId, children }: { tableId: string; children
 
   const deleteRecord = useCallback(async (recordId: string) => {
     setRecords((prev) => prev.filter((r) => r.id !== recordId));
+    setRecordTotal((prev) => (typeof prev === "number" ? Math.max(0, prev - 1) : prev));
+    setRecordsLoaded((prev) => Math.max(0, prev - 1));
     await fetch(`/api/records/${recordId}`, { method: "DELETE" });
   }, []);
 
@@ -245,9 +308,8 @@ export function TableProvider({ tableId, children }: { tableId: string; children
     });
     // Re-fetch so dependent lookup/rollup fields (computed server-side from the
     // link edges) reflect the change.
-    const recs = await fetch(`/api/tables/${tableId}/records`).then((r) => r.json());
-    setRecords(recs.records ?? []);
-  }, [tableId]);
+    await reloadRecords();
+  }, [reloadRecords]);
 
   /* ---- field mutations ---- */
   const addField = useCallback(
@@ -281,14 +343,13 @@ export function TableProvider({ tableId, children }: { tableId: string; children
       );
       // A type change may have rewritten stored cells — refetch records.
       if (patch.type) {
-        const recs = await fetch(`/api/tables/${tableId}/records`).then((r) => r.json());
-        setRecords(recs.records ?? []);
+        await reloadRecords();
       }
     } else {
       const { error } = await res.json().catch(() => ({ error: "Failed" }));
       void dialog.alert({ title: "Something went wrong", message: error });
     }
-  }, [tableId]);
+  }, [reloadRecords, tableId]);
 
   const deleteField = useCallback(async (fieldId: string) => {
     const res = await fetch(`/api/fields/${fieldId}`, { method: "DELETE" });
@@ -350,7 +411,9 @@ export function TableProvider({ tableId, children }: { tableId: string; children
   );
 
   const value: TableCtx = {
-    loading, table, fields, records, views, activeView, tables,
+    loading, table, fields, records, recordLoading, recordTotal, recordsLoaded,
+    hasMoreRecords, viewQueryMode, viewQueryWarning, viewSearch, setViewSearch,
+    loadMoreRecords, views, activeView, tables,
     setActiveViewId, config, updateConfig, reloadTable,
     commitCell, commitCells, addRecord, deleteRecord, setRecordLinks,
     addField, updateField, deleteField, reorderFields,

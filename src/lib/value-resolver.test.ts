@@ -102,6 +102,14 @@ describe("ValueResolver", () => {
     expect(computeCellValue(a, record("rec_1", {}), [a, b])).toBe("#CYCLE");
   });
 
+  it("trusts projected computed values when hidden dependencies are absent", () => {
+    const secret = field("fld_secret", "Secret", "singleLineText");
+    const formula = field("fld_formula", "Formula", "formula", { expression: "UPPER({Secret})" });
+
+    expect(computeCellValue(formula, record("rec_1", { [formula.id]: "ALREADY PROJECTED" }), [secret, formula]))
+      .toBe("ALREADY PROJECTED");
+  });
+
   it("derives a stable auto-number fallback from record identity", () => {
     const auto = field("fld_auto", "No.", "autoNumber");
     const resolver = new ValueResolver([auto]);

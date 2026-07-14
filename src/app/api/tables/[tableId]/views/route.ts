@@ -18,6 +18,7 @@ export async function GET(_req: Request, { params }: Params) {
 const body = z.object({
   name: z.string().min(1).max(255),
   type: z.enum(viewTypes),
+  config: z.record(z.string(), z.unknown()).optional(),
 });
 
 export async function POST(req: Request, { params }: Params) {
@@ -25,7 +26,7 @@ export async function POST(req: Request, { params }: Params) {
     const userId = await requireUserId();
     const { tableId } = await params;
     await assertTableAccess(userId, tableId, true);
-    const { name, type } = body.parse(await req.json());
-    return createView(tableId, name, type);
+    const { name, type, config } = body.parse(await req.json());
+    return createView(tableId, name, type, config, userId);
   });
 }

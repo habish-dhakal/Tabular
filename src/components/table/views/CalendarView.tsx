@@ -6,7 +6,6 @@ import { useTable } from "@/components/table/TableProvider";
 import { RecordModal } from "@/components/table/RecordModal";
 import { CellDisplay } from "@/components/Cell";
 import { computeCellValue } from "@/lib/compute";
-import { applyFilterSort } from "@/lib/query";
 import type { RecordDTO } from "@/lib/types";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -28,7 +27,7 @@ export function CalendarView() {
   const dateField = fields.find((f) => f.id === dateFieldId);
   const primary = fields.find((f) => f.isPrimary) ?? fields[0];
 
-  const rows = useMemo(() => applyFilterSort(records, fields, config), [records, fields, config]);
+  const rows = records;
 
   const byDay = useMemo(() => {
     const map = new Map<string, RecordDTO[]>();
