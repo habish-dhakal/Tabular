@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { Popover } from "@/components/ui/Popover";
 import { useTable } from "@/components/table/TableProvider";
+import { ImportExportMenu } from "@/components/table/ImportExportMenu";
 import { ConditionBuilder } from "@/components/automations/ConditionBuilder";
 import type { SortRule } from "@/lib/types";
 
@@ -223,6 +224,9 @@ export function Toolbar({ type }: { type: string }) {
       <SortMenu />
       {type === "grid" && <GroupMenu />}
       {type === "grid" && <RowHeightMenu />}
+      <div className="ml-auto">
+        <ImportExportMenu />
+      </div>
     </div>
   );
 }

@@ -1,0 +1,197 @@
+{
+  "id": "app_questionnaire_fixture",
+  "name": "Questionnaire Operations Fixture",
+  "tables": [
+    {
+      "id": "tbl_questionnaires",
+      "name": "Questionnaires",
+      "fields": [
+        { "id": "fld_q_name", "name": "Questionnaire", "type": "singleLineText" },
+        { "id": "fld_q_customer", "name": "Customer", "type": "multipleRecordLinks", "options": { "linkedTableId": "tbl_customers" } },
+        { "id": "fld_q_status", "name": "Status", "type": "singleSelect" },
+        { "id": "fld_q_completion", "name": "Completion %", "type": "percent" },
+        { "id": "fld_q_due", "name": "Due Date", "type": "date" },
+        { "id": "fld_q_sla", "name": "SLA Days", "type": "number" },
+        { "id": "fld_q_report", "name": "Advanced Report URL", "type": "url" }
+      ],
+      "records": [
+        {
+          "id": "rec_q_001",
+          "fields": {
+            "Questionnaire": "ACME Security Questionnaire",
+            "Customer": ["rec_c_001"],
+            "Status": "In Progress",
+            "Completion %": 0.72,
+            "Due Date": "2026-07-31",
+            "SLA Days": 10,
+            "Advanced Report URL": "https://example.com/reports/acme"
+          }
+        }
+      ]
+    },
+    {
+      "id": "tbl_tasks",
+      "name": "Tasks",
+      "fields": [
+        { "id": "fld_t_name", "name": "Task", "type": "singleLineText" },
+        { "id": "fld_t_questionnaire", "name": "Questionnaire", "type": "multipleRecordLinks", "options": { "linkedTableId": "tbl_questionnaires" } },
+        { "id": "fld_t_assignee", "name": "Assignee", "type": "singleLineText" },
+        { "id": "fld_t_phase", "name": "Phase", "type": "singleSelect" },
+        { "id": "fld_t_due", "name": "Due Date", "type": "date" },
+        { "id": "fld_t_roe", "name": "ROE", "type": "lookup" }
+      ],
+      "records": [
+        {
+          "id": "rec_t_001",
+          "fields": {
+            "Task": "Draft questionnaire response",
+            "Questionnaire": ["rec_q_001"],
+            "Assignee": "Pod Lead",
+            "Phase": "Drafting",
+            "Due Date": "2026-07-24"
+          }
+        }
+      ]
+    },
+    {
+      "id": "tbl_customers",
+      "name": "Customers",
+      "fields": [
+        { "id": "fld_c_name", "name": "Customer", "type": "singleLineText" },
+        { "id": "fld_c_segment", "name": "Segment", "type": "singleSelect" },
+        { "id": "fld_c_roe", "name": "ROE", "type": "longText" },
+        { "id": "fld_c_utilization", "name": "Utilization %", "type": "percent" },
+        { "id": "fld_c_start", "name": "Service Start", "type": "date" },
+        { "id": "fld_c_end", "name": "Service End", "type": "date" }
+      ],
+      "records": [
+        {
+          "id": "rec_c_001",
+          "fields": {
+            "Customer": "ACME",
+            "Segment": "Enterprise",
+            "ROE": "Standard questionnaire response workflow",
+            "Utilization %": 0.64,
+            "Service Start": "2026-01-01",
+            "Service End": "2026-12-31"
+          }
+        }
+      ]
+    },
+    {
+      "id": "tbl_klu_tasks",
+      "name": "KLU Tasks",
+      "fields": [
+        { "id": "fld_klu_name", "name": "KLU Task", "type": "singleLineText" },
+        { "id": "fld_klu_customer", "name": "Customer", "type": "multipleRecordLinks", "options": { "linkedTableId": "tbl_customers" } },
+        { "id": "fld_klu_response", "name": "Client Response Date", "type": "date" },
+        { "id": "fld_klu_change", "name": "Change %", "type": "percent" },
+        { "id": "fld_klu_owner", "name": "KL Owner", "type": "singleLineText" }
+      ],
+      "records": [
+        {
+          "id": "rec_klu_001",
+          "fields": {
+            "KLU Task": "Refresh answer library",
+            "Customer": ["rec_c_001"],
+            "Client Response Date": "2026-07-10",
+            "Change %": 0.18,
+            "KL Owner": "Knowledge Library Team"
+          }
+        }
+      ]
+    },
+    {
+      "id": "tbl_onboarding",
+      "name": "Onboarding Tasks",
+      "fields": [
+        { "id": "fld_o_name", "name": "Onboarding Task", "type": "singleLineText" },
+        { "id": "fld_o_customer", "name": "Customer", "type": "multipleRecordLinks", "options": { "linkedTableId": "tbl_customers" } },
+        { "id": "fld_o_phase", "name": "Phase", "type": "singleSelect" },
+        { "id": "fld_o_historical", "name": "Historical Questionnaires", "type": "number" },
+        { "id": "fld_o_privacy", "name": "Privacy Documents", "type": "number" }
+      ],
+      "records": [
+        {
+          "id": "rec_o_001",
+          "fields": {
+            "Onboarding Task": "Collect historical questionnaires",
+            "Customer": ["rec_c_001"],
+            "Phase": "Discovery",
+            "Historical Questionnaires": 42,
+            "Privacy Documents": 7
+          }
+        }
+      ]
+    },
+    {
+      "id": "tbl_audit",
+      "name": "TL & QA Audit",
+      "fields": [
+        { "id": "fld_a_name", "name": "Audit", "type": "singleLineText" },
+        { "id": "fld_a_questionnaire", "name": "Questionnaire", "type": "multipleRecordLinks", "options": { "linkedTableId": "tbl_questionnaires" } },
+        { "id": "fld_a_reviewer", "name": "Reviewer", "type": "singleLineText" },
+        { "id": "fld_a_errors", "name": "Error Count", "type": "number" },
+        { "id": "fld_a_shipped", "name": "Shipped Without TL Audit", "type": "checkbox" }
+      ],
+      "records": [
+        {
+          "id": "rec_a_001",
+          "fields": {
+            "Audit": "ACME TL review",
+            "Questionnaire": ["rec_q_001"],
+            "Reviewer": "TL Reviewer",
+            "Error Count": 1,
+            "Shipped Without TL Audit": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "tbl_success",
+      "name": "Success Tickets",
+      "fields": [
+        { "id": "fld_s_name", "name": "Ticket", "type": "singleLineText" },
+        { "id": "fld_s_customer", "name": "Customer", "type": "multipleRecordLinks", "options": { "linkedTableId": "tbl_customers" } },
+        { "id": "fld_s_type", "name": "Type", "type": "singleSelect" },
+        { "id": "fld_s_sla", "name": "SLA Due", "type": "date" },
+        { "id": "fld_s_pmo", "name": "PMO Required", "type": "checkbox" }
+      ],
+      "records": [
+        {
+          "id": "rec_s_001",
+          "fields": {
+            "Ticket": "SIG calibration",
+            "Customer": ["rec_c_001"],
+            "Type": "SIG Calibration",
+            "SLA Due": "2026-08-03",
+            "PMO Required": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "tbl_pocs",
+      "name": "Customer POCs",
+      "fields": [
+        { "id": "fld_p_name", "name": "Name", "type": "singleLineText" },
+        { "id": "fld_p_customer", "name": "Customer", "type": "multipleRecordLinks", "options": { "linkedTableId": "tbl_customers" } },
+        { "id": "fld_p_title", "name": "Title", "type": "singleLineText" },
+        { "id": "fld_p_email", "name": "Email", "type": "email" },
+        { "id": "fld_p_salesforce", "name": "Salesforce Contact ID", "type": "singleLineText" }
+      ],
+      "records": [
+        {
+          "id": "rec_p_001",
+          "fields": {
+            "Name": "Jane Example",
+            "Customer": ["rec_c_001"],
+            "Title": "Engagement Manager",
+            "Email": "jane@example.com",
+            "Salesforce Contact ID": "003EXAMPLE"
+          }
+        }
+      ]
+    }
+  ]
+}

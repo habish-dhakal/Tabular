@@ -257,7 +257,7 @@ async function main() {
     check("grid shows both linked names", body.includes("Ref One") && body.includes("Ref Two"));
 
     // toolbar popovers
-    for (const label of ["Filter", "Sort", "Group"]) {
+    for (const label of ["Filter", "Sort", "Group", "Import / Export"]) {
       await page.evaluate((l) => {
         const b = [...document.querySelectorAll("button")].find((x) => x.textContent.trim() === l);
         b && b.click();
@@ -265,6 +265,10 @@ async function main() {
       await sleep(250);
       const open = await page.evaluate(() => [...document.body.querySelectorAll("div")].some((d) => d.className?.includes?.("z-40") || d.className?.includes?.("z-50")));
       check(`toolbar ${label} opens`, open);
+      if (label === "Import / Export") {
+        const menuText = await page.evaluate(() => document.body.innerText);
+        check("import/export menu exposes CSV and JSON actions", menuText.includes("Export CSV") && menuText.includes("Backup JSON"));
+      }
       await page.keyboard.press("Escape"); await sleep(150);
     }
 

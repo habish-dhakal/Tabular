@@ -26,6 +26,7 @@ interface TableCtx {
   setActiveViewId: (id: string) => void;
   config: ViewConfig;
   updateConfig: (patch: Partial<ViewConfig>) => void;
+  reloadTable: () => Promise<void>;
 
   tables: TableDTO[]; // sibling tables in the base (for link fields)
   commitCell: (recordId: string, fieldId: string, value: unknown) => Promise<void>;
@@ -94,6 +95,25 @@ export function TableProvider({ tableId, children }: { tableId: string; children
   const reloadRecords = useCallback(async () => {
     const recs = await fetch(`/api/tables/${tableId}/records`).then((r) => r.json());
     setRecords(recs.records ?? []);
+  }, [tableId]);
+
+  const reloadTable = useCallback(async () => {
+    const [bundle, recs]: [TableBundle, { records: RecordDTO[] }] = await Promise.all([
+      fetch(`/api/tables/${tableId}`).then((r) => r.json()),
+      fetch(`/api/tables/${tableId}/records`).then((r) => r.json()),
+    ]);
+    setTable(bundle.table);
+    setFields([...bundle.fields].sort((a, b) => a.position - b.position));
+    setViews(bundle.views);
+    setActiveViewId((current) =>
+      current && bundle.views.some((view) => view.id === current)
+        ? current
+        : bundle.views[0]?.id ?? null
+    );
+    setRecords(recs.records ?? []);
+    const siblings = await fetch(`/api/bases/${bundle.table.baseId}/tables`).then((r) => r.json());
+    setTables(siblings.tables ?? []);
+    setLoading(false);
   }, [tableId]);
 
   /* ---- debounced view-config persistence ---- */
@@ -331,7 +351,7 @@ export function TableProvider({ tableId, children }: { tableId: string; children
 
   const value: TableCtx = {
     loading, table, fields, records, views, activeView, tables,
-    setActiveViewId, config, updateConfig,
+    setActiveViewId, config, updateConfig, reloadTable,
     commitCell, commitCells, addRecord, deleteRecord, setRecordLinks,
     addField, updateField, deleteField, reorderFields,
     createView, deleteView,

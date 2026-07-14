@@ -77,7 +77,17 @@ function makeSession() {
     try { json = await res.json(); } catch { /* no body */ }
     return { status: res.status, json };
   }
-  return { req, jar, cookieHeader, absorb };
+  async function raw(method, path, body) {
+    const res = await fetch(B + path, {
+      method,
+      headers: { "content-type": "application/json", cookie: cookieHeader() },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      redirect: "manual",
+    });
+    absorb(res);
+    return { status: res.status, text: await res.text(), headers: res.headers };
+  }
+  return { req, raw, jar, cookieHeader, absorb };
 }
 
 async function login(email) {
@@ -274,6 +284,94 @@ async function main() {
   for (const v of delViews) await s.req("DELETE", `/api/views/${v.id}`);
   check("cannot delete the last view",
     (await s.req("DELETE", `/api/views/${gridView.id}`)).status === 400);
+
+  /* ---- import/export ---- */
+  const importTable = await s.req("POST", `/api/bases/${baseId}/tables`, { name: "Import Ops" });
+  check("create import test table", importTable.status === 200 && importTable.json.table?.id);
+  const importTableId = importTable.json.table.id;
+  const importBundle = await s.req("GET", `/api/tables/${importTableId}`);
+  const importPrimary = importBundle.json.fields.find((f) => f.isPrimary);
+  const importGridView = importBundle.json.views.find((v) => v.type === "grid");
+  const importCsv = "Name,Score\nAlpha,10\nBeta,nope";
+  const scoreMapping = [{ header: "Score", action: "create", name: "Score", type: "number" }];
+
+  const previewImport = await s.req("POST", `/api/tables/${importTableId}/import/preview`, {
+    csv: importCsv,
+    mappings: scoreMapping,
+  });
+  check("CSV import preview reports invalid rows before write",
+    previewImport.status === 200 && previewImport.json.validRows === 1 && previewImport.json.invalidRows === 1,
+    JSON.stringify(previewImport.json));
+  check("CSV import preview plans new typed field",
+    previewImport.json.columns?.some((column) => column.header === "Score" && column.action === "create" && column.type === "number"));
+
+  const strictImport = await s.req("POST", `/api/tables/${importTableId}/import/commit`, {
+    csv: importCsv,
+    mode: "strict",
+    mappings: scoreMapping,
+  });
+  check("CSV strict import refuses partial write",
+    strictImport.status === 200 && strictImport.json.insertedRows === 0 && strictImport.json.status === "completed_with_errors",
+    JSON.stringify(strictImport.json));
+  const afterStrictBundle = await s.req("GET", `/api/tables/${importTableId}`);
+  const afterStrictRecords = await s.req("GET", `/api/tables/${importTableId}/records`);
+  check("CSV strict import creates no fields on invalid preview",
+    !afterStrictBundle.json.fields.some((field) => field.name === "Score"));
+  check("CSV strict import creates no valid-row records when preview invalid",
+    !afterStrictRecords.json.records.some((record) => record.cells?.[importPrimary.id] === "Alpha"));
+
+  const partialImport = await s.req("POST", `/api/tables/${importTableId}/import/commit`, {
+    csv: importCsv,
+    mode: "partial",
+    mappings: scoreMapping,
+  });
+  check("CSV partial import inserts valid rows and reports skipped rows",
+    partialImport.status === 200 && partialImport.json.insertedRows === 1 && partialImport.json.skippedRows === 1,
+    JSON.stringify(partialImport.json));
+  const afterPartialBundle = await s.req("GET", `/api/tables/${importTableId}`);
+  const scoreField = afterPartialBundle.json.fields.find((field) => field.name === "Score");
+  const afterPartialRecords = await s.req("GET", `/api/tables/${importTableId}/records`);
+  const alphaRecord = afterPartialRecords.json.records.find((record) => record.cells?.[importPrimary.id] === "Alpha");
+  check("CSV partial import creates mapped field", !!scoreField && scoreField.type === "number", JSON.stringify(scoreField));
+  check("CSV partial import stores normalized row value", alphaRecord?.cells?.[scoreField.id] === 10, JSON.stringify(alphaRecord?.cells));
+
+  const exportConfig = {
+    hiddenFieldIds: [scoreField.id],
+    filters: { conjunction: "and", conditions: [{ id: "imp1", fieldId: importPrimary.id, op: "is", value: "Alpha" }] },
+  };
+  check("configure export test view",
+    (await s.req("PATCH", `/api/views/${importGridView.id}`, { config: exportConfig })).status === 200);
+  const csvExport = await s.raw("GET", `/api/tables/${importTableId}/export/csv?viewId=${importGridView.id}`);
+  check("CSV export respects view field visibility",
+    csvExport.status === 200 && csvExport.text.startsWith("Name,Notes,Status") && !csvExport.text.includes("Score"),
+    csvExport.text);
+  check("CSV export respects view filters",
+    csvExport.text.includes("Alpha") && !csvExport.text.includes("Beta"),
+    csvExport.text);
+
+  const jsonBackup = await s.req("GET", `/api/bases/${baseId}/export/json`);
+  check("JSON backup export includes tables and records",
+    jsonBackup.status === 200 && jsonBackup.json.tables?.some((item) => item.table.id === importTableId && item.records.length >= 1),
+    JSON.stringify(jsonBackup.json?.tables?.map((item) => item.table.name)));
+
+  const airtablePlan = await s.req("POST", `/api/bases/${baseId}/airtable-import/plan`, {
+    id: "app_questionnaire",
+    name: "Questionnaire",
+    tables: [{
+      id: "tbl_questionnaires",
+      name: "Questionnaires",
+      fields: [
+        { id: "fld_customer", name: "Customer", type: "multipleRecordLinks" },
+        { id: "fld_completion", name: "Completion", type: "formula" },
+      ],
+      records: [{ id: "rec_air_1", fields: { Name: "ACME" } }],
+    }],
+  });
+  check("Airtable import plan preserves source ids and orders link stage",
+    airtablePlan.status === 200 &&
+      airtablePlan.json.recordIdStrategy?.includes("Preserve Airtable record ids") &&
+      airtablePlan.json.stages?.map((stage) => stage.name).join(">") === "create_tables>create_fields>import_records>recreate_links>computed_parity_report",
+    JSON.stringify(airtablePlan.json));
 
   /* ---- linked records ---- */
   const t2 = await s.req("POST", `/api/bases/${baseId}/tables`, { name: "T2" });
