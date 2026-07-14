@@ -1,9 +1,11 @@
 "use client";
 
-import { Download, FileJson, Upload } from "lucide-react";
+import { Download, FileJson, FileUp, Upload, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Popover } from "@/components/ui/Popover";
 import { useTable } from "@/components/table/TableProvider";
+import { parseCsv } from "@/lib/csv";
+import { formatCsvUploadSize, validateCsvUploadCandidate } from "@/lib/import-upload";
 import type { CsvImportPlan, ImportMode } from "@/lib/import-export";
 
 interface CommitReport {
@@ -13,6 +15,13 @@ interface CommitReport {
   skippedRows: number;
   createdFields: { id: string; name: string }[];
   rowErrors: { row: number; errors: string[] }[];
+}
+
+interface CsvFileInfo {
+  name: string;
+  size: number;
+  rows: number;
+  columns: number;
 }
 
 function TriggerButton({ active }: { active?: boolean }) {
@@ -36,6 +45,7 @@ export function ImportExportMenu() {
   const [plan, setPlan] = useState<CsvImportPlan | null>(null);
   const [report, setReport] = useState<CommitReport | null>(null);
   const [error, setError] = useState("");
+  const [fileInfo, setFileInfo] = useState<CsvFileInfo | null>(null);
   const [busy, setBusy] = useState<"preview" | "commit" | null>(null);
 
   const csvExportUrl = useMemo(() => {
@@ -45,6 +55,41 @@ export function ImportExportMenu() {
   }, [activeView, table]);
 
   if (!table) return null;
+
+  function resetImportFeedback() {
+    setPlan(null);
+    setReport(null);
+    setError("");
+  }
+
+  async function chooseCsvFile(file: File | null) {
+    resetImportFeedback();
+    setFileInfo(null);
+    if (!file) return;
+
+    const fileError = validateCsvUploadCandidate(file);
+    if (fileError) {
+      setCsv("");
+      setError(fileError);
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const parsed = parseCsv(text);
+      setCsv(text);
+      setFileInfo({ name: file.name, size: file.size, rows: parsed.rows.length, columns: parsed.headers.length });
+    } catch (err) {
+      setCsv("");
+      setError(err instanceof Error ? err.message : "CSV could not be read");
+    }
+  }
+
+  function clearCsv() {
+    setCsv("");
+    setFileInfo(null);
+    resetImportFeedback();
+  }
 
   async function previewImport() {
     setBusy("preview");
@@ -114,12 +159,56 @@ export function ImportExportMenu() {
             </a>
           </div>
 
+          <div className="rounded-md border border-dashed border-border-token p-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="font-medium">CSV import</p>
+                {fileInfo ? (
+                  <p data-testid="csv-file-summary" className="text-xs text-muted">
+                    {fileInfo.name} · {formatCsvUploadSize(fileInfo.size)} · {formatCount(fileInfo.rows, "row")} · {formatCount(fileInfo.columns, "column")}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted">No file selected</p>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {csv && (
+                  <button
+                    type="button"
+                    onClick={clearCsv}
+                    className="flex items-center gap-1 rounded-md border border-border-token px-2 py-1 text-xs text-muted hover:bg-surface"
+                  >
+                    <X size={13} />
+                    Clear
+                  </button>
+                )}
+                <label
+                  data-testid="csv-upload-button"
+                  className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border-token px-2.5 py-1 text-xs text-foreground hover:bg-surface"
+                >
+                  <FileUp size={14} />
+                  Upload CSV
+                  <input
+                    data-testid="csv-file-input"
+                    type="file"
+                    accept=".csv,text/csv,application/csv"
+                    className="sr-only"
+                    onClick={(e) => {
+                      e.currentTarget.value = "";
+                    }}
+                    onChange={(e) => void chooseCsvFile(e.currentTarget.files?.[0] ?? null)}
+                  />
+                </label>
+              </div>
+            </div>
+          </div>
+
           <textarea
             value={csv}
             onChange={(e) => {
               setCsv(e.target.value);
-              setPlan(null);
-              setReport(null);
+              setFileInfo(null);
+              resetImportFeedback();
             }}
             rows={7}
             spellCheck={false}
@@ -141,6 +230,7 @@ export function ImportExportMenu() {
             </label>
             <div className="flex items-center gap-2">
               <button
+                data-testid="csv-preview-button"
                 onClick={previewImport}
                 disabled={!csv.trim() || busy !== null}
                 className="rounded-md border border-border-token px-2.5 py-1 text-foreground hover:bg-surface disabled:cursor-not-allowed disabled:opacity-50"
@@ -192,6 +282,10 @@ function ImportPlanSummary({ plan }: { plan: CsvImportPlan }) {
       )}
     </div>
   );
+}
+
+function formatCount(count: number, noun: string) {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 function CommitReportSummary({ report }: { report: CommitReport }) {

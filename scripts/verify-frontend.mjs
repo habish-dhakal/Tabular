@@ -9,6 +9,9 @@
  * Env:   CHROME_PATH (default: macOS Google Chrome)
  */
 
+import { writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import puppeteer from "puppeteer-core";
 
 const B = process.argv[2] || process.env.BASE_URL || "http://localhost:3100";
@@ -53,6 +56,11 @@ async function api(j, method, path, body) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   return res.json().catch(() => null);
+}
+async function clearPendingInvites(j, workspaceId) {
+  const invites = await api(j, "GET", `/api/workspaces/${workspaceId}/invites`);
+  if (!Array.isArray(invites)) return;
+  for (const invite of invites) await api(j, "DELETE", `/api/workspaces/${workspaceId}/invites/${invite.id}`);
 }
 
 async function main() {
@@ -268,6 +276,16 @@ async function main() {
       if (label === "Import / Export") {
         const menuText = await page.evaluate(() => document.body.innerText);
         check("import/export menu exposes CSV and JSON actions", menuText.includes("Export CSV") && menuText.includes("Backup JSON"));
+        const csvPath = join(tmpdir(), `tabular-import-${Date.now()}.csv`);
+        writeFileSync(csvPath, "Name,Notes\nUploaded From File,file note\n");
+        const fileInput = await page.$('[data-testid="csv-file-input"]');
+        await fileInput?.uploadFile(csvPath);
+        await sleep(250);
+        const fileSummary = await page.evaluate(() => document.querySelector('[data-testid="csv-file-summary"]')?.textContent ?? "");
+        check("CSV upload shows file summary", fileSummary.includes("tabular-import") && fileSummary.includes("1 row") && fileSummary.includes("2 columns"), fileSummary);
+        await page.click('[data-testid="csv-preview-button"]');
+        await page.waitForFunction(() => document.body.innerText.includes("1/1 rows valid"), { timeout: 4000 }).catch(() => {});
+        check("CSV upload feeds preview flow", (await page.evaluate(() => document.body.innerText)).includes("1/1 rows valid"));
       }
       await page.keyboard.press("Escape"); await sleep(150);
     }
@@ -438,6 +456,7 @@ async function main() {
     check("submitted record carries the typed primary value", afterRecs.some((r) => r.cells[nameF.id] === "form-entry"));
 
     /* ---- member management: settings page + invite create/revoke + accept page ---- */
+    await clearPendingInvites(j, ws);
     await page.goto(`${B}/workspace/${ws}/settings`, { waitUntil: "networkidle0" });
     await page.waitForSelector(testid("members-manager"), { timeout: 4000 }).catch(() => {});
     check("workspace settings page renders members manager", await page.$(testid("members-manager")) !== null);
@@ -468,7 +487,7 @@ async function main() {
     await page.evaluate((s) => document.querySelector(s)?.click(), testid("dialog-confirm"));
     await sleep(500);
     const invitesAfter = await api(j, "GET", `/api/workspaces/${ws}/invites`);
-    check("invite revoked (server)", Array.isArray(invitesAfter) && invitesAfter.length === 0, JSON.stringify(invitesAfter));
+    check("invite revoked (server)", Array.isArray(invitesAfter) && !invitesAfter.some((invite) => invite.id === inviteToken), JSON.stringify(invitesAfter));
 
     check("zero console/page errors", errors.length === 0, errors.slice(0, 4).join(" | "));
   } finally {
