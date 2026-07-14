@@ -220,25 +220,164 @@ Branch: `phase-04-import-export`
 
 PR title: `Phase 4: Add import/export and Airtable data movement`
 
-Goal: safely move Airtable-shaped data into and out of Tabular.
+Goal: safely move Airtable-shaped data into and out of Tabular without
+surprising users, losing data, or forcing wide operational CSVs into the wrong
+shape.
+
+Research and migration notes:
+
+- Airtable's CSV import flow is not a blind upload. It guides users through
+  upload, table selection, merge settings, header detection, field mapping,
+  sample preview, and an explicit create/update action.
+- Airtable supports adding new records to an existing table and merging into
+  existing records by a selected unique field such as an ID or email. Tabular
+  should also add a third mode that Airtable does not make obvious enough:
+  replace the current table schema/data after a destructive preview and
+  rollback plan.
+- Airtable documents import limits around CSV size and row count. Tabular's
+  internal target is larger because the questionnaire migration has 90k+ rows
+  and ongoing weekly growth, so Phase 4 must use import jobs instead of doing
+  large writes in a request/response UI path.
+- The real questionnaire export is a hard requirement, not a toy fixture: it
+  has 52 parsed rows, 163 columns, embedded newlines, repeated customer names,
+  repeated customer IDs, duplicated Airtable headers, SLA/status/date fields,
+  and link-looking columns. The planner must handle that shape cleanly before
+  we trust it with the full migration.
+- Research on messy CSVs and spreadsheet relationalization shows that files in
+  the wild often need dialect detection, semantic column profiling, and
+  normalization suggestions before they become useful relational tables. Use
+  deterministic profiling first; reserve AI-assisted suggestions for Phase 10
+  after permissions, audit, and preview/approval are strong.
+
+Product guidance:
+
+- The Import button must open a wizard, not fire an irreversible import.
+- The wizard must show `Upload -> Profile -> Choose mode -> Map fields ->
+  Preview -> Commit -> Report`.
+- Import modes must be explicit:
+  - `Create new table`: build a new table from the file and suggest the table
+    name from the filename, headers, and detected entity.
+  - `Append to current table`: map CSV columns into existing fields and
+    optionally create new fields if the user has permission.
+  - `Replace current table`: clear/rebuild the current table schema and rows
+    after a destructive confirmation, import snapshot, and rollback path.
+  - `Merge/update records`: select a unique key such as Airtable record ID,
+    customer ID, Salesforce ID, email, or another unique field; preview creates,
+    updates, unchanged rows, skipped rows, and duplicate-key rows.
+- If a user imports into a starter table containing fields like `Name`,
+  `Notes`, and `Status`, Tabular must ask whether to append/map or replace the
+  table. It must not silently append 163 imported columns after starter fields.
+- After import commit, Tabular must reload the active view and show a report
+  with row counts, field counts, skipped rows, warnings, and a `View imported
+  records` action. Hidden fields, filters, or pagination must never make a
+  successful import look empty.
+- Every import job should have an import batch ID/job ID so the user can filter
+  imported records, inspect bad rows, retry a failed job, or roll back a recent
+  import when the phase supports rollback.
+- Table names must be editable inline from the table tab/header, with server
+  validation for blank names, duplicate sibling table names, length, and
+  permissions.
 
 Engineering guidance:
 
-- Separate parsing, validation, mapping, database writing, and reporting.
-- Import UI must not contain import business logic.
-- Preserve Airtable record IDs during migration.
-- Import tables before links, then recreate linked records.
-- Produce a parity report for formulas, lookups, rollups, links, skipped rows,
-  and lossy mappings.
-- Include questionnaire-shaped fixtures for the real migration domain.
+- Own this phase through an `ImportPlanner` and `ImportJobService`. The UI
+  should submit files/options and render plans/reports; it should not decide
+  field types, write records, dedupe customers, or create links.
+- Keep the import pipeline boring and testable:
+  `parse -> profile -> infer -> map -> validate -> plan -> write -> report`.
+- Parsing must support duplicate headers by stable disambiguation, for example
+  `Questionnaire Wizard?` and `Questionnaire Wizard? (2)`, while preserving
+  both column values.
+- Parsing must tolerate embedded newlines, quoted cells, empty trailing columns,
+  common Airtable CSV quirks, and future dialect detection for delimiter/quote
+  variations.
+- Field type inference must be header-aware and value-aware. Use confidence
+  scores and reasons, then let the user override before commit.
+- Inference candidates must cover:
+  - text and long text
+  - number, percent, currency, rating, and duration
+  - checkbox/boolean, single select, and multi-select
+  - date and date-time
+  - URL, email, and phone
+  - attachment-looking URLs as text/URL first, then attachment migration later
+  - external IDs such as Airtable record ID, customer ID, Salesforce ID, and
+    task/questionnaire IDs
+  - linked record candidates when one column repeats and another table/entity
+    can own the repeated values
+- Do not infer formula, lookup, rollup, count, button, created-time, or
+  modified-time fields directly from CSV without an explicit migration mapping
+  and user approval. Imported computed outputs should usually land as static
+  text/number/date fields until Phase 1/3 behavior can recreate them safely.
+- Relationship inference must profile entity hints and repeated keys. For the
+  questionnaire domain, detect candidates such as:
+  - `Client`, `Client Name (Simple)`, `SecurityPal Customer ID`, `SF ID`, and
+    customer start/end date as a possible `Customers` table.
+  - `Questionnaire`, `Airtable Id`, status, SLA, due date, completion, and
+    timeline fields as a possible `Questionnaires` table.
+  - `Tasks`, task status, project lead, collaborators, and SLA task fields as a
+    possible `Tasks` table or linked task fields.
+- Relationship inference must propose a normalized import plan only when it can
+  explain the evidence: entity name, unique key, dedupe count, link cardinality,
+  fields assigned to each table, and sample records. The user approves the
+  split; Tabular must never silently split one CSV into multiple tables.
+- Normalized imports must write dimension/entity tables first, then workflow
+  tables, then link fields/link rows. For example, create/dedupe `Customers` by
+  customer ID or Salesforce ID, import `Questionnaires`, then link each
+  questionnaire back to its customer.
+- Preserve Airtable record IDs and source row numbers as metadata so parity
+  checks, rollback, and audit can trace every migrated record.
+- Export must use the same value engine as imports and must defend against CSV
+  formula injection by escaping dangerous spreadsheet-leading characters when
+  exporting or previewing untrusted values.
+- File upload validation must enforce size, extension/content hints, encoding,
+  row/column limits, tenant ownership, authz, and rate limits. Never trust the
+  browser-provided MIME type as the only guard.
+- Large imports must run as background jobs with chunked writes, progress,
+  cancellation, retry-safe idempotency, and a durable report. A request handler
+  should enqueue work and return job status, not hold the full migration open.
+- Import write paths must be transactional per chunk and must produce a clear
+  failure mode: strict rollback, partial commit with skipped-row report, or
+  cancelled job.
+- Export by table/view must respect permissions, hidden fields, view filters,
+  and field visibility.
+- Include questionnaire-shaped fixtures for the real migration domain. Keep the
+  fixture small enough for unit tests and add a larger synthetic fixture for
+  load/import-job testing.
+- Add a migration parity report that includes source rows, imported rows,
+  created/updated/skipped rows, duplicate headers, inferred field types,
+  created select options, lossy coercions, link cardinality, computed-field
+  fallbacks, and sample invalid rows.
+- Use existing CSV parser, `ValueResolver`, field validation, query service,
+  and Drizzle transaction patterns. Do not build a second validation path just
+  for imports.
 
 Required tests:
 
+- Uploaded Airtable CSV with duplicate headers preserves both columns and both
+  values.
+- Embedded newlines parse into the correct record count.
+- Import planner handles a 163-column questionnaire-shaped CSV without blocking
+  the UI path.
+- `Create new table` creates fields, rows, and a readable default view.
+- `Append to current table` maps existing fields and reports any created or
+  skipped fields.
+- `Replace current table` removes starter fields like `Name`, `Notes`, and
+  `Status` only after explicit confirmation and rolls back on write failure.
+- `Merge/update records` updates by selected key, creates unmatched rows, and
+  reports duplicate/blank keys.
 - Invalid rows report before write.
 - Strict mode rolls back.
 - Partial mode reports skipped rows.
-- Export respects permissions and view visibility.
-- Link cardinality matches source.
+- Field type inference returns confidence and reasons for dates, statuses,
+  numbers, booleans, URLs, customer IDs, Salesforce IDs, and long text.
+- User overrides of inferred field types are honored by the write plan.
+- Relationship inference proposes `Customers` plus `Questionnaires` links for a
+  questionnaire fixture with repeated customer IDs, but does not split without
+  approval.
+- Link cardinality matches source after normalized import.
+- Import report can filter or navigate to imported records.
+- Export respects permissions, hidden fields, view visibility, and CSV
+  injection escaping.
 - `make pre-commit`.
 
 ## Phase 5: Views, Query Engine, And Scale
@@ -310,6 +449,15 @@ Engineering guidance:
 - API routes must call permission service and must not hand-roll role logic.
 - Cover workspace, base, table, field, view, form, interface, and automation
   action permissions.
+- Base create/delete and table create/delete/rename must go through the
+  permission service. Start with owner/admin/creator policies, then make the
+  policy configurable when admin controls arrive.
+- Deleting bases and tables must be a soft-delete lifecycle first: confirm,
+  snapshot/export when appropriate, mark deleted, hide from normal lists, allow
+  restore within a retention window, then hard-delete by maintenance job.
+- Destructive actions must be audit logged with actor, target, timestamp,
+  source IP/user agent when available, row/field impact counts, and rollback or
+  restore metadata.
 - Harden invite/member flows, share links, export controls, field locks,
   comments, revisions, activity feed, and audit log.
 - Rate limiting must account for user, workspace, base, and action, not only
@@ -321,6 +469,10 @@ Required tests:
 - Email-pinned invite rejects wrong email.
 - Field lock blocks grid, API, form, and automation writes.
 - Share links cannot mutate unless configured.
+- Non-admin users cannot delete bases or tables.
+- Soft-deleted tables and bases disappear from normal navigation and can be
+  restored by an authorized user during retention.
+- Delete/restore actions are written to the audit log.
 - 300-user NAT/proxy rate-limit scenario is safe.
 - `make pre-commit`.
 
@@ -390,6 +542,12 @@ Engineering guidance:
   as a superuser.
 - AI mutations require preview and approval.
 - AI/API/MCP actions must be audit logged.
+- AI-assisted import/schema work must consume the Phase 4 import planner. It
+  may propose field types, table splits, links, formulas, views, and cleanup
+  rules, but it must return an editable plan and never write directly.
+- AI should explain uncertainty and ask for approval on destructive or
+  relationship-changing import decisions, especially table replacement,
+  customer dedupe keys, and computed-field recreation.
 - Add schema, field, view, form, and automation intent metadata only after
   permissions and audit are strong.
 - Public API tokens need scoped access and test coverage for every endpoint.
@@ -400,6 +558,8 @@ Required tests:
 - MCP respects user permissions.
 - AI cannot access forbidden data.
 - Generated changes require approval.
+- AI-generated import plans cannot replace tables, split tables, or create
+  links without user approval and audit entries.
 - Audit log captures AI/API actions.
 - `make pre-commit`.
 
