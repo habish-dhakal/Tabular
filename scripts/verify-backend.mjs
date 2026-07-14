@@ -139,7 +139,7 @@ async function main() {
   const types = [
     ["singleLineText", {}], ["longText", {}], ["number", {}], ["currency", {}],
     ["percent", {}], ["checkbox", {}], ["date", {}], ["dateTime", {}],
-    ["url", {}], ["email", {}], ["phone", {}], ["rating", {}],
+    ["url", {}], ["email", {}], ["phone", {}], ["rating", {}], ["duration", {}],
     ["singleSelect", { choices: [{ id: "a", name: "A", color: "#f00" }] }],
     ["multiSelect", { choices: [{ id: "x", name: "X", color: "#0f0" }] }],
     ["formula", { expression: "1 + 2" }],
@@ -150,11 +150,30 @@ async function main() {
     check(`create field ${type}`, r.status === 200 && r.json.id, r.json?.error);
     if (r.json?.id) fieldIds[type] = r.json.id;
   }
+  const userField = await s.req("POST", `/api/tables/${tableId}/fields`, { name: "f_user", type: "user", options: { allowMultiple: true } });
+  check("create field user", userField.status === 200 && userField.json.id, userField.json?.error);
+  fieldIds.user = userField.json?.id;
+  const attachmentField = await s.req("POST", `/api/tables/${tableId}/fields`, {
+    name: "f_attachment",
+    type: "attachment",
+    options: { maxSizeMB: 1, allowedMimeTypes: ["application/pdf"] },
+  });
+  check("create field attachment", attachmentField.status === 200 && attachmentField.json.id, attachmentField.json?.error);
+  fieldIds.attachment = attachmentField.json?.id;
+  const buttonField = await s.req("POST", `/api/tables/${tableId}/fields`, {
+    name: "f_button",
+    type: "button",
+    options: { label: "Open", url: "https://example.com" },
+  });
+  check("create field button", buttonField.status === 200 && buttonField.json.id, buttonField.json?.error);
+  fieldIds.button = buttonField.json?.id;
 
   /* ---- record create + cell writes/validation ---- */
   const recRes = await s.req("POST", `/api/tables/${tableId}/records`, { cells: {} });
   check("create record", recRes.status === 200 && recRes.json.id);
   const recId = recRes.json.id;
+  const ownerMembers = await s.req("GET", `/api/tables/${tableId}/members`);
+  const ownerId = ownerMembers.json?.[0]?.id;
 
   const wr = await s.req("PATCH", `/api/records/${recId}`, {
     cells: { [fieldIds.singleLineText]: "hello", [fieldIds.number]: 42, [fieldIds.checkbox]: true },
@@ -169,8 +188,54 @@ async function main() {
     (await s.req("PATCH", `/api/records/${recId}`, { cells: { [fieldIds.singleSelect]: "a" } })).status === 200);
   const dateWr = await s.req("PATCH", `/api/records/${recId}`, { cells: { [fieldIds.date]: "2026-03-15" } });
   check("date-only stored", dateWr.json?.cells?.[fieldIds.date] === "2026-03-15");
+  const durationWr = await s.req("PATCH", `/api/records/${recId}`, { cells: { [fieldIds.duration]: "1:02:03" } });
+  check("duration stored as seconds", durationWr.status === 200 && durationWr.json?.cells?.[fieldIds.duration] === 3723, JSON.stringify(durationWr.json));
+  check("invalid duration rejected",
+    (await s.req("PATCH", `/api/records/${recId}`, { cells: { [fieldIds.duration]: "later" } })).status === 400);
+  check("user field rejects non-member",
+    (await s.req("PATCH", `/api/records/${recId}`, { cells: { [fieldIds.user]: ["usr_not_member"] } })).status === 400);
+  const userWr = await s.req("PATCH", `/api/records/${recId}`, { cells: { [fieldIds.user]: [ownerId] } });
+  check("user field accepts workspace member", userWr.status === 200 && userWr.json?.cells?.[fieldIds.user]?.[0] === ownerId, JSON.stringify(userWr.json));
+  const attachment = { id: "att_pdf", name: "security.pdf", type: "application/pdf", size: 128, url: "https://example.com/security.pdf" };
+  const attachmentWr = await s.req("PATCH", `/api/records/${recId}`, { cells: { [fieldIds.attachment]: attachment } });
+  check("attachment metadata accepted", attachmentWr.status === 200 && attachmentWr.json?.cells?.[fieldIds.attachment]?.[0]?.name === "security.pdf", JSON.stringify(attachmentWr.json));
+  check("attachment MIME validation rejects disallowed type",
+    (await s.req("PATCH", `/api/records/${recId}`, { cells: { [fieldIds.attachment]: { ...attachment, id: "att_txt", name: "note.txt", type: "text/plain" } } })).status === 400);
+  check("attachment size validation rejects oversize",
+    (await s.req("PATCH", `/api/records/${recId}`, { cells: { [fieldIds.attachment]: { ...attachment, id: "att_big", size: 2_000_000 } } })).status === 400);
   check("write to formula (computed) rejected",
     (await s.req("PATCH", `/api/records/${recId}`, { cells: { [fieldIds.formula]: "x" } })).status === 400);
+  check("write to button (action-only) rejected",
+    (await s.req("PATCH", `/api/records/${recId}`, { cells: { [fieldIds.button]: "x" } })).status === 400);
+
+  /* ---- defaults, required, unique, and conversion preview ---- */
+  check("required field without default rejected when rows are blank",
+    (await s.req("POST", `/api/tables/${tableId}/fields`, { name: "Required No Default", type: "singleLineText", options: { required: true } })).status === 400);
+  const requiredDefault = await s.req("POST", `/api/tables/${tableId}/fields`, {
+    name: "Priority",
+    type: "singleLineText",
+    options: { required: true, defaultValue: "normal" },
+  });
+  check("required field with default accepted", requiredDefault.status === 200 && requiredDefault.json.id, requiredDefault.json?.error);
+  const defaultRec = await s.req("POST", `/api/tables/${tableId}/records`, { cells: {} });
+  check("default value applies on API create", defaultRec.status === 200 && defaultRec.json.cells?.[requiredDefault.json.id] === "normal", JSON.stringify(defaultRec.json));
+  const uniqueField = await s.req("POST", `/api/tables/${tableId}/fields`, {
+    name: "External ID",
+    type: "singleLineText",
+    options: { unique: true },
+  });
+  check("unique field accepted", uniqueField.status === 200 && uniqueField.json.id, uniqueField.json?.error);
+  check("unique value first write accepted",
+    (await s.req("PATCH", `/api/records/${recId}`, { cells: { [uniqueField.json.id]: "ticket-1" } })).status === 200);
+  check("duplicate unique value rejected",
+    (await s.req("POST", `/api/tables/${tableId}/records`, { cells: { [uniqueField.json.id]: "ticket-1" } })).status === 400);
+  const previewField = await s.req("POST", `/api/tables/${tableId}/fields`, { name: "TextNum", type: "singleLineText" });
+  await s.req("POST", `/api/tables/${tableId}/records`, { cells: { [previewField.json.id]: "10" } });
+  await s.req("POST", `/api/tables/${tableId}/records`, { cells: { [previewField.json.id]: "ten" } });
+  const conversionPreview = await s.req("POST", `/api/fields/${previewField.json.id}/conversion-preview`, { type: "number" });
+  check("conversion preview reports lossy values",
+    conversionPreview.status === 200 && conversionPreview.json.convertible >= 1 && conversionPreview.json.cleared >= 1 && conversionPreview.json.samples?.length >= 1,
+    JSON.stringify(conversionPreview.json));
 
   /* ---- field update: rename + type change coercion ---- */
   const ren = await s.req("PATCH", `/api/fields/${fieldIds.phone}`, { name: "Phone2" });
@@ -238,6 +303,10 @@ async function main() {
   const chips = r1Now?.cells[linkFieldId] ?? [];
   check("owner cell resolves 2 link chips", chips.length === 2, JSON.stringify(chips));
   check("chip labels resolved", chips.some((c) => c.label === "Alpha") && chips.some((c) => c.label === "Beta"));
+  const countField = await s.req("POST", `/api/tables/${tableId}/fields`, { name: "Link Count", type: "count", options: { linkFieldId } });
+  check("create count field", countField.status === 200 && countField.json.id, countField.json?.error);
+  const counted = (await s.req("GET", `/api/tables/${tableId}/records`)).json.records.find((r) => r.id === r1.json.id);
+  check("count field resolves linked record count", counted?.cells[countField.json.id] === 2, JSON.stringify(counted?.cells[countField.json.id]));
 
   // symmetric: r2a should show r1 on its reverse field
   const t2Recs = (await s.req("GET", `/api/tables/${t2Id}/records`)).json.records;

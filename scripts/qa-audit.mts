@@ -184,6 +184,15 @@ throws("singleSelect-invalid", () => C("singleSelect", "z", { choices }));
 eq("multiSelect-valid", C("multiSelect", ["a", "b"], { choices }), ["a", "b"]);
 throws("multiSelect-invalid", () => C("multiSelect", ["z"], { choices }));
 eq("user", C("user", "usr_1"), "usr_1");
+eq("user-multiple", C("user", ["usr_1", "usr_2"], { allowMultiple: true }), ["usr_1", "usr_2"]);
+throws("user-single-rejects-many", () => C("user", ["usr_1", "usr_2"]));
+eq("duration-seconds", C("duration", "90"), 90);
+eq("duration-clock", C("duration", "1:02:03"), 3723);
+throws("duration-invalid", () => C("duration", "later"));
+eq("attachment-metadata", C("attachment", { id: "att_1", name: "a.pdf", type: "application/pdf", size: 100 }), [
+  { id: "att_1", name: "a.pdf", size: 100, type: "application/pdf" },
+]);
+throws("attachment-size-limit", () => C("attachment", { id: "att_1", name: "a.pdf", type: "application/pdf", size: 2_000_000 }, { maxSizeMB: 1 }));
 eq("empty-null", C("number", null), undefined);
 eq("empty-string", C("singleLineText", ""), undefined);
 throws("computed-not-editable", () => C("formula", "x"));

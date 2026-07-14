@@ -12,7 +12,7 @@ import { useTable } from "@/components/table/TableProvider";
 
 // Types without a proper editor yet — hidden from the picker until built,
 // so users can't create a field that falls back to a broken text input.
-const NON_CREATABLE: FieldType[] = ["attachment", "user"];
+const NON_CREATABLE: FieldType[] = [];
 const ROLLUP_FNS = ["COUNT", "SUM", "AVERAGE", "MIN", "MAX", "CONCAT"];
 
 function ChoiceEditor({
@@ -112,6 +112,20 @@ export function FieldEditor({
   const [linkFieldId, setLinkFieldId] = useState<string>((field?.options.linkFieldId as string) ?? "");
   const [targetFieldId, setTargetFieldId] = useState<string>((field?.options.targetFieldId as string) ?? "");
   const [rollupFn, setRollupFn] = useState<string>((field?.options.fn as string) ?? "COUNT");
+  const [description, setDescription] = useState<string>((field?.options.description as string) ?? "");
+  const [required, setRequired] = useState<boolean>(field?.options.required === true);
+  const [unique, setUnique] = useState<boolean>(field?.options.unique === true);
+  const [defaultValue, setDefaultValue] = useState<string>(
+    field?.options.defaultValue === undefined ? "" : String(field.options.defaultValue)
+  );
+  const [userAllowMultiple, setUserAllowMultiple] = useState<boolean>(field?.options.allowMultiple === true);
+  const [maxSizeMB, setMaxSizeMB] = useState<string>(String(field?.options.maxSizeMB ?? 25));
+  const [allowedMimeTypes, setAllowedMimeTypes] = useState<string>(
+    Array.isArray(field?.options.allowedMimeTypes) ? field.options.allowedMimeTypes.map(String).join(", ") : ""
+  );
+  const [countLinkFieldId, setCountLinkFieldId] = useState<string>((field?.options.linkFieldId as string) ?? "");
+  const [buttonLabel, setButtonLabel] = useState<string>((field?.options.label as string) ?? "Open");
+  const [buttonUrl, setButtonUrl] = useState<string>((field?.options.url as string) ?? "");
   const [targetFields, setTargetFields] = useState<FieldDTO[]>([]);
 
   const isSelect = type === "singleSelect" || type === "multiSelect";
@@ -119,7 +133,14 @@ export function FieldEditor({
   const isLink = type === "link";
   const isExistingLink = field?.type === "link"; // target can't be changed after creation
   const isRef = type === "lookup" || type === "rollup"; // lookup / rollup
+  const isUser = type === "user";
+  const isAttachment = type === "attachment";
+  const isCount = type === "count";
+  const isButton = type === "button";
   const linkFields = fields.filter((f) => f.type === "link");
+  const canHaveRequired = !isFormula && !isRef && !isCount && !isButton && !isLink;
+  const canHaveUnique = canHaveRequired && !isAttachment;
+  const canHaveDefault = canHaveRequired && !isAttachment;
 
   // When a lookup/rollup's source link field changes, load the linked table's fields.
   const effectiveLinkFieldId = linkFieldId || linkFields[0]?.id || "";
@@ -140,9 +161,32 @@ export function FieldEditor({
     if (isFormula && formulaError) return;
     if (isLink && !isExistingLink && !linkedTableId) return;
     const options: Record<string, unknown> = { ...(field?.options ?? {}) };
+    if (description.trim()) options.description = description.trim();
+    else delete options.description;
+    if (required && canHaveRequired) options.required = true;
+    else delete options.required;
+    if (unique && canHaveUnique) options.unique = true;
+    else delete options.unique;
+    if (defaultValue.trim() && canHaveDefault) options.defaultValue = defaultValue.trim();
+    else delete options.defaultValue;
     if (isSelect) options.choices = choices;
     if (isFormula) options.expression = expression;
     if (isLink && !isExistingLink) { options.linkedTableId = linkedTableId; options.allowMultiple = allowMultiple; }
+    if (isUser) options.allowMultiple = userAllowMultiple;
+    if (isAttachment) {
+      options.maxSizeMB = Number(maxSizeMB) || 25;
+      options.allowedMimeTypes = allowedMimeTypes.split(",").map((item) => item.trim()).filter(Boolean);
+      options.virusScanRequired = true;
+    }
+    if (isCount) {
+      const source = countLinkFieldId || linkFields[0]?.id;
+      if (!source) return;
+      options.linkFieldId = source;
+    }
+    if (isButton) {
+      options.label = buttonLabel.trim() || "Open";
+      options.url = buttonUrl.trim();
+    }
     if (isRef) {
       if (!effectiveLinkFieldId || !targetFieldId) return;
       options.linkFieldId = effectiveLinkFieldId;
@@ -183,6 +227,37 @@ export function FieldEditor({
             ))}
         </select>
       </div>
+      <div>
+        <label className="mb-1 block text-xs font-medium text-muted">Description</label>
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          rows={2}
+          className="w-full resize-y rounded-lg border border-border-token px-2 py-1.5 text-sm outline-none focus:border-accent"
+          placeholder="Optional field guidance"
+        />
+      </div>
+      {canHaveDefault && (
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted">Default value</label>
+          <input
+            value={defaultValue}
+            onChange={(e) => setDefaultValue(e.target.value)}
+            className="w-full rounded-lg border border-border-token px-2 py-1.5 text-sm outline-none focus:border-accent"
+            placeholder="Optional default for new records"
+          />
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={required && canHaveRequired} onChange={(e) => setRequired(e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" disabled={!canHaveRequired} />
+          Required
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={unique && canHaveUnique} onChange={(e) => setUnique(e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" disabled={!canHaveUnique} />
+          Unique
+        </label>
+      </div>
       {isSelect && (
         <div>
           <label className="mb-1 block text-xs font-medium text-muted">Options</label>
@@ -217,6 +292,48 @@ export function FieldEditor({
               Allow linking to multiple records
             </label>
           )}
+        </div>
+      )}
+      {isUser && (
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={userAllowMultiple} onChange={(e) => setUserAllowMultiple(e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />
+          Allow assigning multiple users
+        </label>
+      )}
+      {isAttachment && (
+        <div className="space-y-2">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Max file size (MB)</label>
+            <input value={maxSizeMB} onChange={(e) => setMaxSizeMB(e.target.value)} type="number" min={1} className="w-full rounded-lg border border-border-token px-2 py-1.5 text-sm outline-none focus:border-accent" />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Allowed MIME types</label>
+            <input value={allowedMimeTypes} onChange={(e) => setAllowedMimeTypes(e.target.value)} className="w-full rounded-lg border border-border-token px-2 py-1.5 text-sm outline-none focus:border-accent" placeholder="image/*, application/pdf" />
+          </div>
+        </div>
+      )}
+      {isCount && (
+        linkFields.length === 0 ? (
+          <p className="rounded-lg bg-surface px-2 py-2 text-xs text-muted">Create a “Link to record” field first — counts need linked records.</p>
+        ) : (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Link field to count</label>
+            <select value={countLinkFieldId || linkFields[0]?.id || ""} onChange={(e) => setCountLinkFieldId(e.target.value)} className="w-full rounded-lg border border-border-token px-2 py-1.5 text-sm outline-none focus:border-accent">
+              {linkFields.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+          </div>
+        )
+      )}
+      {isButton && (
+        <div className="space-y-2">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Button label</label>
+            <input value={buttonLabel} onChange={(e) => setButtonLabel(e.target.value)} className="w-full rounded-lg border border-border-token px-2 py-1.5 text-sm outline-none focus:border-accent" />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">URL</label>
+            <input value={buttonUrl} onChange={(e) => setButtonUrl(e.target.value)} className="w-full rounded-lg border border-border-token px-2 py-1.5 text-sm outline-none focus:border-accent" placeholder="https://example.com" />
+          </div>
         </div>
       )}
       {isRef && (

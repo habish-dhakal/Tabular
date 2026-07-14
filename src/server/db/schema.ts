@@ -160,7 +160,10 @@ export const fieldTypes = [
   "link", // linked record → another table
   "lookup", // pull a value from a linked record
   "rollup", // aggregate over linked records
+  "count", // count linked records
   "formula",
+  "duration",
+  "button",
   "autoNumber",
   "createdTime",
   "updatedTime",

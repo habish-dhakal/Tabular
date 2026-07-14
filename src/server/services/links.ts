@@ -167,6 +167,7 @@ function aggregate(fn: string, values: (string | number | boolean | null)[], lin
  *  - link:   cells[fieldId] = LinkChip[]
  *  - lookup: cells[fieldId] = value[]  (pulled from linked records)
  *  - rollup: cells[fieldId] = aggregate over linked records
+ *  - count:  cells[fieldId] = linked record count
  */
 export async function enrichRecords(
   tableId: string,
@@ -175,7 +176,7 @@ export async function enrichRecords(
   if (recs.length === 0) return recs;
   const allFields = (await db.query.fields.findMany({ where: eq(fields.tableId, tableId) })) as unknown as FieldDTO[];
   const linkFields = allFields.filter((f) => f.type === "link");
-  const refFields = allFields.filter((f) => f.type === "lookup" || f.type === "rollup");
+  const refFields = allFields.filter((f) => f.type === "lookup" || f.type === "rollup" || f.type === "count");
   if (linkFields.length === 0 && refFields.length === 0) return recs;
 
   const recIds = recs.map((r) => r.id);
@@ -217,16 +218,24 @@ export async function enrichRecords(
     }
   }
 
-  // lookup / rollup over the resolved edges
+  // lookup / rollup / count over the resolved edges
   for (const cf of refFields) {
     const linkFieldId = cf.options.linkFieldId as string | undefined;
     const targetFieldId = cf.options.targetFieldId as string | undefined;
     const lf = linkFields.find((f) => f.id === linkFieldId);
-    if (!lf || !targetFieldId) { for (const r of recs) r.cells[cf.id] = cf.type === "lookup" ? [] : null; continue; }
+    if (!lf || (!targetFieldId && cf.type !== "count")) {
+      for (const r of recs) r.cells[cf.id] = cf.type === "lookup" ? [] : cf.type === "count" ? 0 : null;
+      continue;
+    }
 
     const byRecord = linkedIdsByField.get(lf.id) ?? new Map();
+    if (cf.type === "count") {
+      for (const r of recs) r.cells[cf.id] = (byRecord.get(r.id) ?? []).length;
+      continue;
+    }
     const targetTableId = lf.options.linkedTableId as string;
-    const targetField = (await db.query.fields.findFirst({ where: eq(fields.id, targetFieldId) })) as unknown as FieldDTO | undefined;
+    const targetId = targetFieldId as string;
+    const targetField = (await db.query.fields.findFirst({ where: eq(fields.id, targetId) })) as unknown as FieldDTO | undefined;
     const targetFields = (await db.query.fields.findMany({ where: eq(fields.tableId, targetTableId) })) as unknown as FieldDTO[];
     const resolver = new ValueResolver(targetFields);
 

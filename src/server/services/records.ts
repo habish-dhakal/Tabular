@@ -1,8 +1,18 @@
-import { and, asc, eq, gt, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { db } from "@/server/db";
 import { fields, records } from "@/server/db/schema";
-import { coerceCellValue, isComputed } from "@/lib/fields";
+import {
+  duplicateUniqueValue,
+  fieldIsUnique,
+  normalizeInitialCells,
+  normalizePatchedCells,
+  userIdsForFieldValue,
+  validateRequiredFields,
+} from "@/lib/field-behavior";
+import type { FieldDTO, RecordDTO } from "@/lib/types";
+import { isBlankValue } from "@/lib/value-resolver";
 import { emitChangeEvent } from "@/server/automations/emit";
+import { memberIdsForTable } from "@/server/services/workspaces";
 
 /** Shallow JSON-value equality for two cell values (stored primitives/arrays). */
 function cellsEqual(a: unknown, b: unknown): boolean {
@@ -33,6 +43,12 @@ export async function createRecord(
   userId: string,
   cells: Record<string, unknown> = {}
 ) {
+  const tableFields = await db.query.fields.findMany({ where: eq(fields.tableId, tableId) }) as unknown as FieldDTO[];
+  const normalizedCells = normalizeInitialCells(tableFields, cells);
+  validateRequiredFields(tableFields, normalizedCells);
+  await validateUserMembers(tableId, tableFields, normalizedCells);
+  await validateUniqueCells(tableId, tableFields, normalizedCells);
+
   const posRow = await db
     .select({ max: sql<number>`coalesce(max(${records.position}), -1)` })
     .from(records)
@@ -41,7 +57,7 @@ export async function createRecord(
 
   const [record] = await db
     .insert(records)
-    .values({ tableId, position, cells, createdBy: userId, updatedBy: userId })
+    .values({ tableId, position, cells: normalizedCells, createdBy: userId, updatedBy: userId })
     .returning();
 
   emitChangeEvent({
@@ -67,20 +83,13 @@ export async function updateRecordCells(
 
   const tableFields = await db.query.fields.findMany({
     where: eq(fields.tableId, record.tableId),
-  });
-  const byId = new Map(tableFields.map((f) => [f.id, f]));
+  }) as unknown as FieldDTO[];
 
   const before = { ...(record.cells as Record<string, unknown>) };
-  const nextCells = { ...before };
-  for (const [fieldId, raw] of Object.entries(patch)) {
-    const field = byId.get(fieldId);
-    if (!field) throw new Error(`Unknown field ${fieldId}`);
-    if (isComputed(field.type)) throw new Error(`Field "${field.name}" is computed`);
-
-    const coerced = coerceCellValue(field.type, raw, field.options);
-    if (coerced === undefined) delete nextCells[fieldId];
-    else nextCells[fieldId] = coerced;
-  }
+  const nextCells = normalizePatchedCells(tableFields, before, patch);
+  validateRequiredFields(tableFields, nextCells);
+  await validateUserMembers(record.tableId, tableFields, nextCells);
+  await validateUniqueCells(record.tableId, tableFields, nextCells, recordId);
 
   const [updated] = await db
     .update(records)
@@ -103,6 +112,37 @@ export async function updateRecordCells(
     });
   }
   return updated;
+}
+
+async function validateUserMembers(
+  tableId: string,
+  tableFields: FieldDTO[],
+  cells: Record<string, unknown>
+) {
+  const ids = new Set<string>();
+  for (const field of tableFields) {
+    for (const userId of userIdsForFieldValue(field, cells[field.id])) ids.add(userId);
+  }
+  if (ids.size === 0) return;
+  const members = await memberIdsForTable(tableId);
+  for (const userId of ids) {
+    if (!members.has(userId)) throw new Error(`User "${userId}" is not a workspace member`);
+  }
+}
+
+async function validateUniqueCells(
+  tableId: string,
+  tableFields: FieldDTO[],
+  cells: Record<string, unknown>,
+  excludeRecordId?: string
+) {
+  const uniqueFields = tableFields.filter((field) => fieldIsUnique(field) && !isBlankValue(cells[field.id]));
+  if (uniqueFields.length === 0) return;
+  const existing = await db.query.records.findMany({ where: eq(records.tableId, tableId) }) as unknown as RecordDTO[];
+  for (const field of uniqueFields) {
+    const duplicate = duplicateUniqueValue(existing, field, cells[field.id], excludeRecordId);
+    if (duplicate) throw new Error(`Field "${field.name}" must be unique`);
+  }
 }
 
 export async function deleteRecord(recordId: string) {

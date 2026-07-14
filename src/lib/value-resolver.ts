@@ -1,3 +1,4 @@
+import { normalizeAttachmentValue } from "@/lib/attachments";
 import { evaluateFormula, type FormulaValue } from "@/lib/formula";
 import type { FieldDTO, FilterOp, RecordDTO } from "@/lib/types";
 import type { FieldType } from "@/server/db/schema";
@@ -62,7 +63,22 @@ function parseBoolean(value: unknown): boolean {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value !== 0;
   const s = String(value).toLowerCase();
-  return s === "true" || s === "1" || s === "yes" || s === "on";
+  return !(s === "false" || s === "0" || s === "no" || s === "off");
+}
+
+function parseDurationSeconds(value: unknown): number {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value < 0) throw new Error("Invalid duration");
+    return Math.round(value);
+  }
+  const s = String(value).trim();
+  if (/^\d+(\.\d+)?$/.test(s)) return Math.round(Number(s));
+  if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(s)) {
+    const parts = s.split(":").map(Number);
+    if (parts.length === 2) return parts[0] * 60 + parts[1];
+    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  }
+  throw new Error("Invalid duration");
 }
 
 function recordWithCells(cells: Record<string, unknown>): RecordDTO {
@@ -139,6 +155,13 @@ export class ValueResolver {
       case "lookup":
       case "rollup":
         return record.cells[field.id];
+      case "count": {
+        const linkFieldId = field.options.linkFieldId as string | undefined;
+        const linked = linkFieldId ? record.cells[linkFieldId] : undefined;
+        return Array.isArray(linked) ? linked.length : 0;
+      }
+      case "button":
+        return field.options.label ?? "Open";
       default:
         return record.cells[field.id];
     }
@@ -155,6 +178,8 @@ export class ValueResolver {
         return linkLabels(value).join(", ");
       case "lookup":
         return asArray(value).join(", ");
+      case "user":
+        return asArray(value).join(", ");
       case "checkbox":
         return Boolean(value);
       default:
@@ -170,6 +195,8 @@ export class ValueResolver {
         return linkLabels(value).join(", ");
       case "lookup":
         return Array.isArray(value) ? value.map(String).join(", ") : String(value);
+      case "user":
+        return asArray(value).join(", ");
       default:
         return value;
     }
@@ -183,6 +210,8 @@ export class ValueResolver {
         return asArray(value).map((id) => choiceName(field, id));
       case "link":
         return linkLabels(value);
+      case "user":
+        return asArray(value);
       default:
         return value;
     }
@@ -252,6 +281,10 @@ export class ValueResolver {
       if (linkFieldId) deps.add(linkFieldId);
       if (targetFieldId) deps.add(targetFieldId);
     }
+    if (field.type === "count") {
+      const linkFieldId = field.options.linkFieldId as string | undefined;
+      if (linkFieldId) deps.add(linkFieldId);
+    }
     return deps;
   }
 
@@ -295,6 +328,8 @@ export class ValueResolver {
       field.type === "formula" ||
       field.type === "lookup" ||
       field.type === "rollup" ||
+      field.type === "count" ||
+      field.type === "button" ||
       field.type === "autoNumber" ||
       field.type === "createdTime" ||
       field.type === "updatedTime" ||
@@ -349,7 +384,7 @@ export function normalizeFieldValue(
     }
 
     case "checkbox":
-      return Boolean(value);
+      return parseBoolean(value);
 
     case "date": {
       const s = String(value);
@@ -383,10 +418,17 @@ export function normalizeFieldValue(
     }
 
     case "attachment":
-      return Array.isArray(value) ? value : [value];
+      return normalizeAttachmentValue(value, options);
 
-    case "user":
-      return String(value);
+    case "user": {
+      const allowMultiple = options.allowMultiple === true;
+      const ids = (Array.isArray(value) ? value : [value]).map(String).filter(Boolean);
+      if (!allowMultiple && ids.length > 1) throw new Error("Only one user is allowed");
+      return allowMultiple ? ids : ids[0];
+    }
+
+    case "duration":
+      return parseDurationSeconds(value);
 
     default:
       throw new Error(`Field type "${type}" is not directly editable`);

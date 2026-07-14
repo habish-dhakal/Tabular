@@ -2,8 +2,9 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, Star } from "lucide-react";
+import { Check, ExternalLink, Paperclip, Star, UserCircle } from "lucide-react";
 import type { FieldDTO } from "@/lib/types";
+import type { AttachmentMetadata } from "@/lib/attachments";
 import type { SelectChoice } from "@/lib/fields";
 import { isComputed } from "@/lib/fields";
 import { CellPopover } from "@/components/cell-editors/CellPopover";
@@ -41,6 +42,22 @@ function SelectBadge({ choice }: { choice: SelectChoice }) {
       {choice.name}
     </span>
   );
+}
+
+function fmtDuration(seconds: unknown): string {
+  const total = Math.max(0, Math.round(Number(seconds) || 0));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return h > 0
+    ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+    : `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
 }
 
 /** Read-only rendering of a (possibly computed) cell value.
@@ -91,6 +108,8 @@ export function CellDisplay({ field, value, expanded }: { field: FieldDTO; value
     }
     case "percent":
       return <span>{Number(value)}%</span>;
+    case "duration":
+      return <span>{fmtDuration(value)}</span>;
 
     case "date":
       return <span>{fmtDate(value)}</span>;
@@ -131,6 +150,33 @@ export function CellDisplay({ field, value, expanded }: { field: FieldDTO; value
       );
     }
 
+    case "user": {
+      const ids = Array.isArray(value) ? value.map(String) : [String(value)];
+      return (
+        <span className="flex flex-wrap gap-1.5">
+          {ids.filter(Boolean).map((id) => (
+            <span key={id} className={CHIP_CLS}>
+              <UserCircle size={12} className="mr-1" /> {id}
+            </span>
+          ))}
+        </span>
+      );
+    }
+
+    case "attachment": {
+      const items = Array.isArray(value) ? (value as AttachmentMetadata[]) : [];
+      if (items.length === 0) return <span className="text-transparent">·</span>;
+      return (
+        <span className="flex flex-wrap gap-1.5">
+          {items.map((item) => (
+            <span key={item.id} className={CHIP_CLS} title={`${item.name} · ${formatBytes(item.size)}`}>
+              <Paperclip size={12} className="mr-1" /> {item.name}
+            </span>
+          ))}
+        </span>
+      );
+    }
+
     case "lookup": {
       const vals = Array.isArray(value) ? value : [value];
       if (vals.length === 0) return <span className="text-transparent">·</span>;
@@ -154,6 +200,17 @@ export function CellDisplay({ field, value, expanded }: { field: FieldDTO; value
       return (
         <span className={textCls + (s === "#ERROR" || s === "#CYCLE" ? " text-red-600" : "")}>{s}</span>
       );
+    }
+
+    case "button": {
+      const label = String(field.options.label ?? value ?? "Open");
+      const url = String(field.options.url ?? "").trim();
+      const inner = (
+        <span className="inline-flex items-center gap-1 rounded-md border border-border-token bg-surface px-2 py-1 text-xs font-medium">
+          {label} {url && <ExternalLink size={12} />}
+        </span>
+      );
+      return expanded && url ? <a href={url} target="_blank" rel="noreferrer">{inner}</a> : inner;
     }
 
     default:
@@ -221,6 +278,134 @@ function LongTextFloating({
   );
 }
 
+interface MemberOption {
+  id: string;
+  name: string | null;
+  email: string;
+}
+
+function UserPicker({
+  field,
+  value,
+  onCommit,
+}: {
+  field: FieldDTO;
+  value: unknown;
+  onCommit: (value: unknown) => void;
+}) {
+  const [members, setMembers] = useState<MemberOption[]>([]);
+  const allowMultiple = field.options.allowMultiple === true;
+  const selected = new Set((Array.isArray(value) ? value : value ? [value] : []).map(String));
+
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/tables/${field.tableId}/members`)
+      .then((res) => res.json())
+      .then((items) => alive && setMembers(Array.isArray(items) ? items : []))
+      .catch(() => alive && setMembers([]));
+    return () => {
+      alive = false;
+    };
+  }, [field.tableId]);
+
+  return (
+    <div className="max-h-64 min-w-56 space-y-1 overflow-y-auto p-2">
+      {members.map((member) => {
+        const on = selected.has(member.id);
+        return (
+          <button
+            key={member.id}
+            type="button"
+            onClick={() => {
+              if (!allowMultiple) {
+                onCommit(on ? null : member.id);
+                return;
+              }
+              const next = new Set(selected);
+              if (on) next.delete(member.id);
+              else next.add(member.id);
+              onCommit([...next]);
+            }}
+            className={"flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface " + (on ? "bg-surface" : "")}
+          >
+            <UserCircle size={16} className="text-muted" />
+            <span className="min-w-0">
+              <span className="block truncate">{member.name || member.email}</span>
+              {member.name && <span className="block truncate text-xs text-muted">{member.email}</span>}
+            </span>
+          </button>
+        );
+      })}
+      {members.length === 0 && <p className="px-2 py-1 text-xs text-muted">No workspace members.</p>}
+    </div>
+  );
+}
+
+function AttachmentEditor({
+  value,
+  onCommit,
+}: {
+  value: unknown;
+  onCommit: (value: unknown) => void;
+}) {
+  const [items, setItems] = useState<AttachmentMetadata[]>(Array.isArray(value) ? value as AttachmentMetadata[] : []);
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
+  const [type, setType] = useState("application/octet-stream");
+  const [size, setSize] = useState("0");
+
+  const commit = (next: AttachmentMetadata[]) => {
+    setItems(next);
+    onCommit(next.length ? next : null);
+  };
+
+  return (
+    <div className="w-80 space-y-2 p-2">
+      <div className="space-y-1">
+        {items.map((item) => (
+          <div key={item.id} className="flex items-center justify-between gap-2 rounded-md border border-border-token px-2 py-1 text-xs">
+            <span className="min-w-0 truncate">{item.name}</span>
+            <button type="button" onClick={() => commit(items.filter((next) => next.id !== item.id))} className="text-muted hover:text-red-600">
+              Remove
+            </button>
+          </div>
+        ))}
+      </div>
+      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="File name" className="w-full rounded border border-border-token px-2 py-1 text-sm outline-none focus:border-accent" />
+      <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="URL or storage key" className="w-full rounded border border-border-token px-2 py-1 text-sm outline-none focus:border-accent" />
+      <div className="grid grid-cols-2 gap-2">
+        <input value={type} onChange={(e) => setType(e.target.value)} placeholder="MIME type" className="rounded border border-border-token px-2 py-1 text-sm outline-none focus:border-accent" />
+        <input value={size} onChange={(e) => setSize(e.target.value)} type="number" min={0} placeholder="Bytes" className="rounded border border-border-token px-2 py-1 text-sm outline-none focus:border-accent" />
+      </div>
+      <button
+        type="button"
+        onClick={() => {
+          const trimmed = name.trim();
+          if (!trimmed) return;
+          const next = [
+            ...items,
+            {
+              id: url.trim() || trimmed,
+              name: trimmed,
+              url: url.trim() || undefined,
+              type: type.trim() || "application/octet-stream",
+              size: Number(size) || 0,
+              scanStatus: "pending" as const,
+            },
+          ];
+          commit(next);
+          setName("");
+          setUrl("");
+          setSize("0");
+        }}
+        className="rounded-md bg-accent px-2 py-1 text-sm font-medium text-accent-contrast"
+      >
+        Add attachment metadata
+      </button>
+    </div>
+  );
+}
+
 /**
  * Editable cell editor.
  *  - onCommit(v): save AND exit edit mode (used for single-shot edits)
@@ -249,7 +434,7 @@ export function CellEditor({
   );
   const save = onChange ?? onCommit;
 
-  const inlineTypes = new Set(["singleLineText", "url", "email", "phone", "number", "currency", "percent"]);
+  const inlineTypes = new Set(["singleLineText", "url", "email", "phone", "number", "currency", "percent", "duration"]);
   useEffect(() => {
     if (!inlineTypes.has(field.type)) return;
     inputRef.current?.focus();
@@ -323,6 +508,40 @@ export function CellEditor({
           className="w-full rounded border border-accent bg-background p-1 text-sm outline-none"
         />
       );
+
+    case "duration":
+      return (
+        <input
+          ref={inputRef as React.RefObject<HTMLInputElement>}
+          value={draft}
+          placeholder="Seconds or h:mm:ss"
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commitText}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") onCancel();
+            if (e.key === "Enter") commitText();
+          }}
+          className="w-full rounded border border-accent bg-background p-1 text-sm outline-none"
+        />
+      );
+
+    case "user": {
+      const picker = <UserPicker field={field} value={value} onCommit={(v) => save(v)} />;
+      return anchorRect ? (
+        <CellPopover anchorRect={anchorRect} onClose={onCancel} minWidth={240}>{picker}</CellPopover>
+      ) : (
+        <div className="rounded-lg border border-border-token">{picker}</div>
+      );
+    }
+
+    case "attachment": {
+      const editor = <AttachmentEditor value={value} onCommit={(v) => save(v)} />;
+      return anchorRect ? (
+        <CellPopover anchorRect={anchorRect} onClose={onCancel} minWidth={320}>{editor}</CellPopover>
+      ) : (
+        <div className="rounded-lg border border-border-token">{editor}</div>
+      );
+    }
 
     case "rating": {
       const max = (field.options.max as number) ?? 5;

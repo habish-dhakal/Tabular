@@ -32,6 +32,8 @@ export function fieldCategory(type: FieldType): FieldCategory {
     case "percent":
     case "rating":
     case "autoNumber":
+    case "duration":
+    case "count":
       return "number";
     case "checkbox":
       return "boolean";

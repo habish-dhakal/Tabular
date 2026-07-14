@@ -4,15 +4,8 @@ import { useMemo, useState } from "react";
 import { CheckCircle2, Star } from "lucide-react";
 import { useTable } from "@/components/table/TableProvider";
 import { Toggle } from "@/components/ui/Toggle";
-import { isComputed } from "@/lib/fields";
+import { fieldDescription, fieldIsFormEligible, fieldIsRequired } from "@/lib/field-behavior";
 import type { FieldDTO } from "@/lib/types";
-
-// Field types a form can collect. Computed fields are never writable; link/
-// attachment/user need richer pickers than a form should carry (v1 limitation).
-const UNSUPPORTED = new Set(["link", "attachment", "user"]);
-function isFormEligible(f: FieldDTO): boolean {
-  return !isComputed(f.type) && !UNSUPPORTED.has(f.type);
-}
 
 type Choice = { id: string; name: string; color: string };
 
@@ -149,8 +142,7 @@ function FieldControl({
 export function FormView() {
   const { fields, table, config, updateConfig, addRecord } = useTable();
   const formCfg = config.form ?? {};
-  const eligible = useMemo(() => fields.filter(isFormEligible), [fields]);
-  const primary = fields.find((f) => f.isPrimary);
+  const eligible = useMemo(() => fields.filter(fieldIsFormEligible), [fields]);
 
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -162,11 +154,8 @@ export function FormView() {
 
   async function submit() {
     setError(null);
-    // Primary field is required — a record with no primary value is meaningless.
-    if (primary && !String(values[primary.id] ?? "").trim()) {
-      setError(`${primary.name} is required.`);
-      return;
-    }
+    const missing = eligible.find((field) => fieldIsRequired(field) && !String(values[field.id] ?? "").trim());
+    if (missing) { setError(`${missing.name} is required.`); return; }
     const cells: Record<string, unknown> = {};
     for (const f of eligible) {
       const v = values[f.id];
@@ -227,8 +216,9 @@ export function FormView() {
             <div key={f.id}>
               <label className="mb-1.5 block text-sm font-medium">
                 {f.name}
-                {f.isPrimary && <span className="ml-1 text-red-500">*</span>}
+                {fieldIsRequired(f) && <span className="ml-1 text-red-500">*</span>}
               </label>
+              {fieldDescription(f) && <p className="mb-1.5 text-xs text-muted">{fieldDescription(f)}</p>}
               <FieldControl
                 field={f}
                 value={values[f.id]}

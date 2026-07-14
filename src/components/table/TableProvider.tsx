@@ -91,6 +91,11 @@ export function TableProvider({ tableId, children }: { tableId: string; children
   );
   const config = activeView?.config ?? {};
 
+  const reloadRecords = useCallback(async () => {
+    const recs = await fetch(`/api/tables/${tableId}/records`).then((r) => r.json());
+    setRecords(recs.records ?? []);
+  }, [tableId]);
+
   /* ---- debounced view-config persistence ---- */
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const updateConfig = useCallback(
@@ -136,8 +141,12 @@ export function TableProvider({ tableId, children }: { tableId: string; children
     if (res.ok) {
       const updated: RecordDTO = await res.json();
       setRecords((prev) => prev.map((r) => (r.id === recordId ? updated : r)));
+    } else {
+      const { error } = await res.json().catch(() => ({ error: "Failed" }));
+      await reloadRecords();
+      void dialog.alert({ title: "Cell update rejected", message: error });
     }
-  }, []);
+  }, [dialog, reloadRecords]);
 
   const commitCells = useCallback(async (patches: CellPatch[]) => {
     if (patches.length === 0) return;
@@ -156,22 +165,29 @@ export function TableProvider({ tableId, children }: { tableId: string; children
       })
     );
 
-    const updated = await Promise.all(
-      [...byRecord.entries()].map(async ([recordId, mine]) => {
-        const res = await fetch(`/api/records/${recordId}`, {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            cells: Object.fromEntries(mine.map((patch) => [patch.fieldId, valueForPayload(patch.value)])),
-          }),
-        });
-        return res.ok ? ((await res.json()) as RecordDTO) : null;
-      })
-    );
-    setRecords((prev) =>
-      prev.map((record) => updated.find((next) => next?.id === record.id) ?? record)
-    );
-  }, []);
+    try {
+      const updated = await Promise.all(
+        [...byRecord.entries()].map(async ([recordId, mine]) => {
+          const res = await fetch(`/api/records/${recordId}`, {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              cells: Object.fromEntries(mine.map((patch) => [patch.fieldId, valueForPayload(patch.value)])),
+            }),
+          });
+          if (res.ok) return (await res.json()) as RecordDTO;
+          const { error } = await res.json().catch(() => ({ error: "Failed" }));
+          throw new Error(error);
+        })
+      );
+      setRecords((prev) =>
+        prev.map((record) => updated.find((next) => next?.id === record.id) ?? record)
+      );
+    } catch (err) {
+      await reloadRecords();
+      void dialog.alert({ title: "Cell update rejected", message: err instanceof Error ? err.message : "Failed" });
+    }
+  }, [dialog, reloadRecords]);
 
   const addRecord = useCallback(
     async (cells: Record<string, unknown> = {}) => {
@@ -180,12 +196,16 @@ export function TableProvider({ tableId, children }: { tableId: string; children
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ cells }),
       });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({ error: "Failed" }));
+        void dialog.alert({ title: "Record rejected", message: error });
+        return null;
+      }
       const rec: RecordDTO = await res.json();
       setRecords((prev) => [...prev, rec]);
       return rec;
     },
-    [tableId]
+    [dialog, tableId]
   );
 
   const deleteRecord = useCallback(async (recordId: string) => {
