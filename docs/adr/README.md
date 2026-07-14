@@ -12,7 +12,7 @@ Create or update an ADR before implementing material behavior in these areas:
 | --- | --- |
 | Values | Field values must resolve the same way in API, grid, forms, imports, exports, queries, and automations. |
 | Field behavior | User-created fields need one contract for writable values, defaults, required/unique rules, attachments, and computed/action-only fields. |
-| Import/export and Airtable migration | [ADR 0004](./0004-import-export-airtable-migration.md) owns CSV preview/commit/export and Airtable migration staging. |
+| Import/export and Airtable migration | [ADR 0004](./0004-import-export-airtable-migration.md) owns CSV preview/commit/export and Airtable migration staging. [ADR 0006](./0006-migration-grade-import-ux-and-table-state.md) owns migration-grade import modes, route-safe table/view state, imported-grid scrolling, and table rename/delete migration UX. |
 | Permissions | Authz must be centralized and reviewable for OWASP/ASVS expectations. |
 | Imports | Large Airtable migrations need explicit rollback, validation, and partial-write semantics. |
 | Forms | Public capture routes have different trust boundaries than authenticated app routes. |
