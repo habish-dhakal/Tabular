@@ -66,19 +66,51 @@ function parseBoolean(value: unknown): boolean {
   return !(s === "false" || s === "0" || s === "no" || s === "off");
 }
 
-function parseDurationSeconds(value: unknown): number {
+function durationUnitMultiplier(unit: unknown): number {
+  switch (unit) {
+    case "days":
+      return 86_400;
+    case "hours":
+      return 3_600;
+    case "minutes":
+      return 60;
+    default:
+      return 1;
+  }
+}
+
+function parseDurationSeconds(value: unknown, options: Record<string, unknown> = {}): number {
+  const multiplier = durationUnitMultiplier(options.unit);
   if (typeof value === "number") {
-    if (!Number.isFinite(value) || value < 0) throw new Error("Invalid duration");
+    if (!Number.isFinite(value)) throw new Error("Invalid duration");
     return Math.round(value);
   }
   const s = String(value).trim();
-  if (/^\d+(\.\d+)?$/.test(s)) return Math.round(Number(s));
-  if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(s)) {
-    const parts = s.split(":").map(Number);
-    if (parts.length === 2) return parts[0] * 60 + parts[1];
-    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (/^-?\d+(\.\d+)?$/.test(s)) return Math.round(Number(s) * multiplier);
+  const clock = s.match(/^(-?)(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (clock) {
+    const sign = clock[1] === "-" ? -1 : 1;
+    const hoursOrMinutes = Number(clock[2]);
+    const minutesOrSeconds = Number(clock[3]);
+    const seconds = clock[4] === undefined ? 0 : Number(clock[4]);
+    const total = clock[4] === undefined
+      ? hoursOrMinutes * 60 + minutesOrSeconds
+      : hoursOrMinutes * 3600 + minutesOrSeconds * 60 + seconds;
+    return sign * total;
+  }
+  const withUnit = s.match(/^(-?\d+(?:\.\d+)?)\s*(d|day|days|h|hr|hrs|hour|hours|m|min|mins|minute|minutes|s|sec|secs|second|seconds)(?:\s+\w+)?$/i);
+  if (withUnit) {
+    return Math.round(Number(withUnit[1]) * durationUnitMultiplier(normalizeDurationUnit(withUnit[2])));
   }
   throw new Error("Invalid duration");
+}
+
+function normalizeDurationUnit(unit: string): "days" | "hours" | "minutes" | "seconds" {
+  const lower = unit.toLowerCase();
+  if (lower === "d" || lower.startsWith("day")) return "days";
+  if (lower === "h" || lower.startsWith("hr") || lower.startsWith("hour")) return "hours";
+  if (lower === "m" || lower.startsWith("min") || lower.startsWith("minute")) return "minutes";
+  return "seconds";
 }
 
 function recordWithCells(cells: Record<string, unknown>): RecordDTO {
@@ -431,7 +463,7 @@ export function normalizeFieldValue(
     }
 
     case "duration":
-      return parseDurationSeconds(value);
+      return parseDurationSeconds(value, options);
 
     default:
       throw new Error(`Field type "${type}" is not directly editable`);

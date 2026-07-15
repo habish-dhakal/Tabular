@@ -79,6 +79,31 @@ describe("CSV import planning", () => {
     });
   });
 
+  it("accepts signed Airtable SLA duration columns and stores them in seconds", () => {
+    const plan = buildCsvImportPlan(
+      parseCsv("Questionnaire,Hours Left (Lower Bound),Email Confirm Time(minutes),SLA Upper bound (Days)\nQ1,-11,60,5.0\nQ2,-40,747,1.5"),
+      [],
+      []
+    );
+    const lowerBound = plan.columns.find((column) => column.header === "Hours Left (Lower Bound)");
+    const confirmTime = plan.columns.find((column) => column.header === "Email Confirm Time(minutes)");
+    const upperDays = plan.columns.find((column) => column.header === "SLA Upper bound (Days)");
+
+    expect(plan.invalidRows).toBe(0);
+    expect(lowerBound).toMatchObject({ type: "duration", options: { unit: "hours" } });
+    expect(confirmTime).toMatchObject({ type: "duration", options: { unit: "minutes" } });
+    expect(upperDays).toMatchObject({ type: "duration", options: { unit: "days" } });
+    expect(plan.rows[0].cells[lowerBound!.tempFieldId!]).toBe(-39_600);
+    expect(plan.rows[0].cells[confirmTime!.tempFieldId!]).toBe(3_600);
+    expect(plan.rows[0].cells[upperDays!.tempFieldId!]).toBe(432_000);
+    expect(plan.rows[1].cells[lowerBound!.tempFieldId!]).toBe(-144_000);
+  });
+
+  it("infers textual duration values without misclassifying SLA label text", () => {
+    expect(inferFieldType(["83 Hours Passed", "70 Hours Passed"], "Time Elapsed From Submission")).toBe("duration");
+    expect(inferFieldType(["Standard: <=5 Business Days", "Platinum: Next Day - 24 to 36 hours"], "Questionnaire SLA (Customer)")).toBe("singleLineText");
+  });
+
   it("suggests merge keys and customer relationship candidates", () => {
     const customerId = field("fld_customer_id", "SecurityPal Customer ID", "singleLineText", { unique: true });
     const plan = buildCsvImportPlan(

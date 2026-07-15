@@ -121,6 +121,18 @@ describe("ValueResolver", () => {
     expect(typeof first).toBe("number");
   });
 
+  it("normalizes signed and unit-aware duration values", () => {
+    const hoursLeft = field("fld_hours", "Hours left", "duration", { unit: "hours" });
+    const confirmMinutes = field("fld_minutes", "Confirm minutes", "duration", { unit: "minutes" });
+    const resolver = new ValueResolver([hoursLeft, confirmMinutes]);
+
+    expect(resolver.normalize(hoursLeft, "-11")).toBe(-39_600);
+    expect(resolver.normalize(hoursLeft, "1.5")).toBe(5_400);
+    expect(resolver.normalize(confirmMinutes, "60")).toBe(3_600);
+    expect(resolver.normalize(confirmMinutes, "16 mins")).toBe(960);
+    expect(resolver.normalize(hoursLeft, "-1:02:03")).toBe(-3_723);
+  });
+
   it("keeps compareByField wired to resolver semantics", () => {
     const lookup = field("fld_lookup", "Lookup", "lookup");
 

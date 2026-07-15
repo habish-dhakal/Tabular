@@ -128,6 +128,7 @@ export function inferFieldTypeProfile(header: string, values: string[]): FieldTy
   if (filled.every(isPhoneText)) return inference("phone", 0.88, "all populated values look like phone numbers");
   if (filled.every(isCurrencyText)) return inference("currency", 0.9, "all populated values look like currency");
   if (filled.every(isPercentText)) return inference("percent", 0.9, "all populated values look like percentages");
+  if (filled.every(isDurationText)) return inference("duration", 0.88, "all populated values include duration units");
   if (filled.every(isNumberText)) return inferNumericType(lowerHeader, filled);
   if (filled.every(isDateTimeText)) return inference("dateTime", 0.9, "all populated values include date and time");
   if (filled.every(isDateText) || (looksDateHeader(lowerHeader) && mostly(filled, isDateText))) {
@@ -196,6 +197,14 @@ function isNumberText(value: string) {
   return !Number.isNaN(Number(value.trim().replace(/,/g, "")));
 }
 
+function isDurationText(value: string) {
+  const trimmed = value.trim();
+  return (
+    /^-?\d{1,2}:\d{2}(:\d{2})?$/.test(trimmed) ||
+    /^-?\d+(\.\d+)?\s*(d|day|days|h|hr|hrs|hour|hours|m|min|mins|minute|minutes|s|sec|secs|second|seconds)(?:\s+\w+)?$/i.test(trimmed)
+  );
+}
+
 function isCurrencyText(value: string) {
   const trimmed = value.trim();
   return /^[$€£¥]\s*-?\d[\d,]*(\.\d+)?$/.test(trimmed) || /^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(trimmed);
@@ -259,7 +268,7 @@ export function buildCsvImportPlan(
       tempFieldId: `__new_${header}`,
       fieldName: explicit?.name?.trim() || header,
       type,
-      options: explicit?.options ?? optionsForInferredType(type, parsed.rows.map((row) => row[header] ?? "")),
+      options: explicit?.options ?? optionsForInferredType(type, header, parsed.rows.map((row) => row[header] ?? "")),
       inference: explicit?.type ? { type, confidence: 1, reasons: ["chosen by mapping"] } : inference,
     };
   });
@@ -334,12 +343,30 @@ export function buildCsvImportPlan(
   };
 }
 
-function optionsForInferredType(type: FieldType, values: string[]): Record<string, unknown> {
+function optionsForInferredType(type: FieldType, header: string, values: string[]): Record<string, unknown> {
+  if (type === "duration") return { unit: inferDurationUnit(header, values) };
   if (type !== "singleSelect" && type !== "multiSelect") return {};
   const choices = [...new Set(values.map((value) => value.trim()).filter(Boolean))]
     .slice(0, 100)
     .map((value, index) => ({ id: value, name: value, color: SELECT_COLORS[index % SELECT_COLORS.length] }));
   return { choices };
+}
+
+function inferDurationUnit(header: string, values: string[]): "days" | "hours" | "minutes" | "seconds" {
+  const lower = header.toLowerCase();
+  if (/\b(days?|business days?)\b/.test(lower)) return "days";
+  if (/\b(hours?|hrs?|hr|hrs)\b/.test(lower)) return "hours";
+  if (/\b(minutes?|mins?|min)\b/.test(lower)) return "minutes";
+  if (/\b(seconds?|secs?|sec)\b/.test(lower)) return "seconds";
+  const firstUnitValue = values.map((value) => value.trim()).find((value) => isDurationText(value));
+  const unit = firstUnitValue?.match(/\b(d|day|days|h|hr|hrs|hour|hours|m|min|mins|minute|minutes|s|sec|secs|second|seconds)\b/i)?.[1];
+  if (unit) {
+    const normalized = unit.toLowerCase();
+    if (normalized === "d" || normalized.startsWith("day")) return "days";
+    if (normalized === "h" || normalized.startsWith("hr") || normalized.startsWith("hour")) return "hours";
+    if (normalized === "m" || normalized.startsWith("min") || normalized.startsWith("minute")) return "minutes";
+  }
+  return /\bsla\b/.test(lower) ? "hours" : "seconds";
 }
 
 function safeWritableType(type: FieldType): FieldType {

@@ -184,7 +184,7 @@ export function ImportExportMenu() {
       if (!res.ok) throw new Error(body.error ?? "Import failed");
       setReport(body);
       setPlan(null);
-      await reloadTable();
+      if (body.tableId === table!.id) await reloadTable();
       if (body.tableId) navigateToReport(body);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed");
@@ -194,6 +194,7 @@ export function ImportExportMenu() {
   }
 
   function navigateToReport(nextReport: Pick<CommitReport, "tableId" | "viewId">) {
+    if (!nextReport.tableId) return;
     const params = new URLSearchParams({ table: nextReport.tableId });
     if (nextReport.viewId) params.set("view", nextReport.viewId);
     router.push(`/base/${table!.baseId}?${params.toString()}`);
@@ -410,10 +411,14 @@ function CommitReportSummary({ report, onView }: { report: CommitReport; onView:
           {report.insertedRows} inserted, {report.updatedRows} updated, {report.skippedRows} skipped
         </span>
       </div>
-      <button onClick={onView} className="mt-2 flex items-center gap-1 rounded border border-border-token px-2 py-1 text-xs text-foreground hover:bg-surface">
-        <Eye size={13} />
-        View {report.tableName}
-      </button>
+      {report.tableId ? (
+        <button data-testid="csv-report-view-button" onClick={onView} className="mt-2 flex items-center gap-1 rounded border border-border-token px-2 py-1 text-xs text-foreground hover:bg-surface">
+          <Eye size={13} />
+          View {report.tableName}
+        </button>
+      ) : (
+        <p className="mt-1 text-xs text-muted">Fix the reported rows before viewing an imported table.</p>
+      )}
       {report.createdFields.length > 0 && (
         <p className="mt-1 text-muted">
           Created fields: {report.createdFields.slice(0, 12).map((field) => field.name).join(", ")}

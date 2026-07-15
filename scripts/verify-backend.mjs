@@ -399,7 +399,7 @@ async function main() {
     targetMode: "create",
     tableName: "Questionnaire Import",
     mode: "strict",
-    csv: "Questionnaire,Task Status,Due Date,SecurityPal Customer ID\nQ1,Done,2026/07/14,SP-1\nQ2,Todo,2026/07/15,SP-1",
+    csv: "Questionnaire,Task Status,Due Date,SecurityPal Customer ID,Hours Left (Lower Bound),Email Confirm Time(minutes),AI Duration\nQ1,Done,2026/07/14,SP-1,-11,60,16 mins\nQ2,Todo,2026/07/15,SP-1,-40,747,30 mins",
   });
   check("CSV create-table import creates a new table and view",
     createImport.status === 200 && createImport.json.targetMode === "create" && createImport.json.tableId && createImport.json.viewId,
@@ -408,14 +408,30 @@ async function main() {
   const createdQuestionnaireField = createdImportBundle.json.fields.find((field) => field.name === "Questionnaire");
   const createdStatusField = createdImportBundle.json.fields.find((field) => field.name === "Task Status");
   const createdDueField = createdImportBundle.json.fields.find((field) => field.name === "Due Date");
+  const createdHoursLeftField = createdImportBundle.json.fields.find((field) => field.name === "Hours Left (Lower Bound)");
+  const createdConfirmField = createdImportBundle.json.fields.find((field) => field.name === "Email Confirm Time(minutes)");
+  const createdAiDurationField = createdImportBundle.json.fields.find((field) => field.name === "AI Duration");
   check("CSV create-table import infers useful field types",
-    createdQuestionnaireField?.isPrimary === true && createdStatusField?.type === "singleSelect" && createdDueField?.type === "date",
+    createdQuestionnaireField?.isPrimary === true &&
+      createdStatusField?.type === "singleSelect" &&
+      createdDueField?.type === "date" &&
+      createdHoursLeftField?.type === "duration" &&
+      createdHoursLeftField?.options?.unit === "hours" &&
+      createdConfirmField?.type === "duration" &&
+      createdConfirmField?.options?.unit === "minutes" &&
+      createdAiDurationField?.type === "duration",
     JSON.stringify(createdImportBundle.json.fields));
   const createdImportRecords = await s.req("GET", `/api/tables/${createImport.json.tableId}/records`);
   check("CSV create-table import writes records",
     createdImportRecords.json.records?.some((record) => record.cells?.[createdQuestionnaireField.id] === "Q1") &&
       createdImportRecords.json.records?.length === 2,
     JSON.stringify(createdImportRecords.json.records));
+  const q1ImportRecord = createdImportRecords.json.records?.find((record) => record.cells?.[createdQuestionnaireField.id] === "Q1");
+  check("CSV create-table import stores signed and unit-aware durations",
+    q1ImportRecord?.cells?.[createdHoursLeftField.id] === -39_600 &&
+      q1ImportRecord?.cells?.[createdConfirmField.id] === 3_600 &&
+      q1ImportRecord?.cells?.[createdAiDurationField.id] === 960,
+    JSON.stringify(q1ImportRecord?.cells));
 
   const mergeImport = await s.req("POST", `/api/bases/${baseId}/import/commit`, {
     targetMode: "merge",

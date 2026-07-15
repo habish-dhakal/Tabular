@@ -341,6 +341,35 @@ async function main() {
         await page.click('[data-testid="csv-preview-button"]');
         await page.waitForFunction(() => document.body.innerText.includes("1/1 rows valid"), { timeout: 4000 }).catch(() => {});
         check("CSV upload feeds preview flow", (await page.evaluate(() => document.body.innerText)).includes("1/1 rows valid"));
+
+        const blockedCsvPath = join(tmpdir(), `tabular-blocked-import-${Date.now()}.csv`);
+        writeFileSync(blockedCsvPath, "Score\nnope\n");
+        await fileInput?.uploadFile(blockedCsvPath);
+        await sleep(250);
+        await page.click('[data-testid="csv-preview-button"]');
+        await page.waitForFunction(() => document.body.innerText.includes("1/1 rows valid"), { timeout: 4000 }).catch(() => {});
+        await page.evaluate(() => {
+          const selects = [...document.querySelectorAll("select")];
+          const typeSelect = selects.find((select) =>
+            [...select.options].some((option) => option.value === "number") &&
+            [...select.options].some((option) => option.value === "singleLineText") &&
+            select.value === "singleLineText"
+          );
+          if (!typeSelect) return;
+          typeSelect.value = "number";
+          typeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        await sleep(100);
+        await page.evaluate(() => {
+          const button = [...document.querySelectorAll("button")].find((item) => item.textContent.trim() === "Import");
+          button?.click();
+        });
+        await page.waitForFunction(() => document.body.innerText.includes("Fix the reported rows before viewing an imported table."), { timeout: 4000 }).catch(() => {});
+        const blockedText = await page.evaluate(() => document.body.innerText);
+        check("blocked create import does not show fake view action",
+          blockedText.includes("Fix the reported rows before viewing an imported table.") &&
+            await page.$('[data-testid="csv-report-view-button"]') === null,
+          blockedText.slice(0, 260));
       }
       await page.keyboard.press("Escape"); await sleep(150);
     }
