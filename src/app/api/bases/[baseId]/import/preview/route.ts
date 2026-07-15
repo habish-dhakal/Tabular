@@ -32,5 +32,5 @@ export async function POST(req: Request, { params }: Params) {
     const { baseId } = await params;
     await assertBaseAccess(userId, baseId, true);
     return previewBaseCsvImport(baseId, body.parse(await req.json()));
-  });
+  }, { rateLimit: "import" });
 }

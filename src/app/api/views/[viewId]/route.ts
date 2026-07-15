@@ -2,6 +2,7 @@ import { z } from "zod";
 import { handle, requireUserId } from "@/server/api-helpers";
 import { AccessError, assertTableAccess } from "@/server/services/access";
 import { deleteView, tableIdForView, updateView } from "@/server/services/views";
+import { emitProductionSafetyEvent } from "@/server/production-events";
 
 type Params = { params: Promise<{ viewId: string }> };
 
@@ -36,6 +37,7 @@ export async function DELETE(_req: Request, { params }: Params) {
     const tableId = await requireTableId(viewId);
     await assertTableAccess(userId, tableId, true);
     await deleteView(viewId);
+    emitProductionSafetyEvent({ kind: "view.delete", actorId: userId, tableId, targetId: viewId });
     return { ok: true };
-  });
+  }, { rateLimit: "destructive" });
 }

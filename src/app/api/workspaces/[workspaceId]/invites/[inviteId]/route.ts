@@ -1,6 +1,7 @@
 import { handle, requireUserId } from "@/server/api-helpers";
 import { AccessError, assertWorkspaceAdminAccess } from "@/server/services/access";
 import { inviteById, revokeInvite } from "@/server/services/invites";
+import { emitProductionSafetyEvent } from "@/server/production-events";
 
 type Params = { params: Promise<{ workspaceId: string; inviteId: string }> };
 
@@ -13,6 +14,8 @@ export async function DELETE(_req: Request, { params }: Params) {
     const inv = await inviteById(inviteId);
     // Guard against revoking another workspace's invite via a mismatched path.
     if (!inv || inv.workspaceId !== workspaceId) throw new AccessError(404, "Invite not found");
-    return revokeInvite(inviteId);
-  });
+    const result = await revokeInvite(inviteId);
+    emitProductionSafetyEvent({ kind: "invite.revoke", actorId: userId, workspaceId, targetId: inviteId });
+    return result;
+  }, { rateLimit: "destructive" });
 }

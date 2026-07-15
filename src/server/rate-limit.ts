@@ -16,12 +16,70 @@ export interface RateLimitConfig {
   windowSec: number; // window length in seconds
 }
 
+export type RateLimitAction =
+  | "api"
+  | "auth"
+  | "read"
+  | "write"
+  | "import"
+  | "export"
+  | "destructive"
+  | "automation";
+
+const ACTION_LIMITS: Record<RateLimitAction, { max: number; windowSec: number }> = {
+  api: { max: 240, windowSec: 60 },
+  auth: { max: 60, windowSec: 60 },
+  read: { max: 600, windowSec: 60 },
+  write: { max: 180, windowSec: 60 },
+  import: { max: 30, windowSec: 60 },
+  export: { max: 60, windowSec: 60 },
+  destructive: { max: 30, windowSec: 60 },
+  automation: { max: 90, windowSec: 60 },
+};
+
+function numberFromEnv(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
+  const raw = env[key];
+  if (raw === undefined || raw === "") return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 export function rateLimitConfig(env: NodeJS.ProcessEnv = process.env): RateLimitConfig {
-  const max = env.RATE_LIMIT_MAX ? Number(env.RATE_LIMIT_MAX) : 240;
-  const windowSec = env.RATE_LIMIT_WINDOW_SEC ? Number(env.RATE_LIMIT_WINDOW_SEC) : 60;
+  return rateLimitConfigForAction("api", env);
+}
+
+export function rateLimitConfigForAction(
+  action: RateLimitAction,
+  env: NodeJS.ProcessEnv = process.env
+): RateLimitConfig {
+  const defaults = ACTION_LIMITS[action];
+  const prefix = `RATE_LIMIT_${action.toUpperCase()}`;
+  const max = numberFromEnv(env, `${prefix}_MAX`, numberFromEnv(env, "RATE_LIMIT_MAX", defaults.max));
+  const windowSec = numberFromEnv(
+    env,
+    `${prefix}_WINDOW_SEC`,
+    numberFromEnv(env, "RATE_LIMIT_WINDOW_SEC", defaults.windowSec)
+  );
   // On in production; off elsewhere unless forced. max=0 disables entirely.
   const gate = env.NODE_ENV === "production" || env.RATE_LIMIT_FORCE === "1";
   return { enabled: gate && max > 0, max, windowSec };
+}
+
+export interface RateLimitKeyParts {
+  action: RateLimitAction;
+  ip: string;
+  userId?: string | null;
+  workspaceId?: string | null;
+  baseId?: string | null;
+}
+
+export function rateLimitKey(parts: RateLimitKeyParts): string {
+  const scope = [
+    parts.userId ? `u:${parts.userId}` : `ip:${parts.ip || "unknown"}`,
+    parts.workspaceId ? `w:${parts.workspaceId}` : null,
+    parts.baseId ? `b:${parts.baseId}` : null,
+  ].filter(Boolean);
+  return [parts.action, ...scope].join(":");
 }
 
 export interface RateLimitResult {

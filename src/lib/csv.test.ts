@@ -35,6 +35,8 @@ describe("csv helpers", () => {
     // Danger char plus a comma still gets quoted after the guard.
     expect(stringifyCsv(["Name"], [{ Name: "=A1,B2" }])).toBe("Name\n\"'=A1,B2\"");
     expect(stringifyCsv(["Name"], [{ Name: "@SUM(A1)" }])).toBe("Name\n'@SUM(A1)");
+    expect(stringifyCsvMatrix(["A", "B", "C"], [["+1", "-1", "@cmd"]]))
+      .toBe("A,B,C\n'+1,'-1,'@cmd");
     // Ordinary values are untouched.
     expect(stringifyCsv(["Name"], [{ Name: "Alpha" }])).toBe("Name\nAlpha");
   });

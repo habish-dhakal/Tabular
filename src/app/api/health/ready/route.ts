@@ -1,12 +1,9 @@
 import { NextResponse } from "next/server";
+
 import { readinessReport, readinessStatusCode } from "@/server/health";
 
 export const dynamic = "force-dynamic";
 
-/**
- * Backward-compatible readiness probe for load balancers + uptime monitors.
- * Unauthenticated and unthrottled. 200 when Postgres and required env are ready.
- */
 export async function GET() {
   const report = await readinessReport();
   return NextResponse.json(report, { status: readinessStatusCode(report) });

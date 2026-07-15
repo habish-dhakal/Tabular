@@ -32,5 +32,5 @@ export async function POST(req: Request, { params }: Params) {
     await assertTableAccess(userId, tableId, true);
     const parsed = body.parse(await req.json());
     return previewCsvImport(tableId, parsed);
-  });
+  }, { rateLimit: "import" });
 }

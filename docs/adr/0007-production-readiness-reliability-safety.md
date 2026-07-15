@@ -92,6 +92,31 @@ Phase 7 is accepted only when these gates exist and pass:
 - stale route recovery browser tests
 - backup/restore smoke or documented executable flow
 
+## Implementation Notes
+
+This PR lands the first production-readiness slice:
+
+- Typed runtime environment validation for database, auth, Redis, OAuth, email,
+  Slack, and automation stubbing.
+- Split liveness/readiness probes at `/api/health/live` and
+  `/api/health/ready`, while keeping `/api/health` backward-compatible.
+- API route policy inventory with a verification script that fails when a new
+  route lacks security metadata.
+- Safe API error envelopes with stable codes and request IDs.
+- Action-aware rate-limit configuration and user-aware keys with IP fallback.
+- Stricter rate-limit buckets on import, export, automation, and destructive
+  routes.
+- Structured production safety events for imports, exports, deletes, member
+  removal, invite revoke, and automation deletion.
+- CSV export hardening against spreadsheet formula injection.
+- Makefile/package gates for route-policy verification, load smoke, and
+  production smoke.
+
+The remaining Phase 7 production slices still need durable database-backed
+import jobs, backup/restore workflows, slow-query metrics, soft-delete/restore
+mechanics, large-data fixtures, full CI service containers, stale-route UX
+states, and measured k6 thresholds.
+
 ## Consequences And Rollback Notes
 
 The roadmap becomes longer by one phase, but the later feature phases become

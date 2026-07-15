@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { memoryCheck, rateLimitConfig, type WindowEntry } from "./rate-limit";
+import {
+  memoryCheck,
+  rateLimitConfig,
+  rateLimitConfigForAction,
+  rateLimitKey,
+  type WindowEntry,
+} from "./rate-limit";
 
 describe("rateLimitConfig", () => {
   it("stays disabled outside production unless forced", () => {
@@ -29,6 +35,30 @@ describe("rateLimitConfig", () => {
         RATE_LIMIT_MAX: "0",
       }).enabled
     ).toBe(false);
+  });
+
+  it("supports action-specific buckets and overrides", () => {
+    expect(rateLimitConfigForAction("import", { NODE_ENV: "production" })).toMatchObject({
+      enabled: true,
+      max: 30,
+      windowSec: 60,
+    });
+    expect(
+      rateLimitConfigForAction("import", {
+        NODE_ENV: "production",
+        RATE_LIMIT_IMPORT_MAX: "4",
+        RATE_LIMIT_IMPORT_WINDOW_SEC: "10",
+      })
+    ).toEqual({ enabled: true, max: 4, windowSec: 10 });
+  });
+
+  it("builds action-aware keys with user scope preferred over IP scope", () => {
+    expect(rateLimitKey({ action: "write", ip: "203.0.113.10", userId: "usr_1" })).toBe(
+      "write:u:usr_1"
+    );
+    expect(rateLimitKey({ action: "import", ip: "203.0.113.10", workspaceId: "w1", baseId: "b1" })).toBe(
+      "import:ip:203.0.113.10:w:w1:b:b1"
+    );
   });
 });
 

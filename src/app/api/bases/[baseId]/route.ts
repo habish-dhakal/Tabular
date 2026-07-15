@@ -4,6 +4,7 @@ import { db } from "@/server/db";
 import { bases } from "@/server/db/schema";
 import { handle, requireUserId } from "@/server/api-helpers";
 import { assertBaseAccess } from "@/server/services/access";
+import { emitProductionSafetyEvent } from "@/server/production-events";
 
 type Params = { params: Promise<{ baseId: string }> };
 
@@ -30,6 +31,7 @@ export async function DELETE(_req: Request, { params }: Params) {
     const { baseId } = await params;
     await assertBaseAccess(userId, baseId, true);
     await db.delete(bases).where(eq(bases.id, baseId)); // cascades to tables/fields/records/views
+    emitProductionSafetyEvent({ kind: "base.delete", actorId: userId, baseId });
     return { ok: true };
-  });
+  }, { rateLimit: "destructive" });
 }

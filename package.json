@@ -23,9 +23,10 @@
     "worker": "tsx --env-file=.env src/worker/index.ts",
     "verify:unit": "vitest run",
     "verify:logic": "tsx scripts/qa-audit.mts",
+    "verify:route-policy": "tsx scripts/verify-route-policy.mts",
     "verify:backend": "node scripts/verify-backend.mjs",
     "verify:frontend": "node scripts/verify-frontend.mjs",
-    "verify": "npm run verify:unit && npm run verify:logic && npm run verify:backend && npm run verify:frontend"
+    "verify": "npm run verify:unit && npm run verify:logic && npm run verify:route-policy && npm run verify:backend && npm run verify:frontend"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.2",

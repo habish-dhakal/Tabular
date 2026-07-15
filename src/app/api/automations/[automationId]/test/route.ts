@@ -46,5 +46,5 @@ export async function POST(req: Request, { params }: Params) {
 
     const result = await runAutomation(automation, event, { senders: stubSenders });
     return result;
-  });
+  }, { rateLimit: "automation" });
 }

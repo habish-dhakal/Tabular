@@ -3,6 +3,7 @@ import { handle, requireUserId } from "@/server/api-helpers";
 import { assertTableAccess } from "@/server/services/access";
 import { commitCsvImport } from "@/server/services/import-export";
 import { fieldTypes } from "@/server/db/schema";
+import { emitProductionSafetyEvent } from "@/server/production-events";
 
 type Params = { params: Promise<{ tableId: string }> };
 
@@ -33,6 +34,20 @@ export async function POST(req: Request, { params }: Params) {
     const { tableId } = await params;
     await assertTableAccess(userId, tableId, true);
     const parsed = body.parse(await req.json());
-    return commitCsvImport(tableId, userId, parsed);
-  });
+    const report = await commitCsvImport(tableId, userId, parsed);
+    emitProductionSafetyEvent({
+      kind: "import.commit",
+      actorId: userId,
+      tableId: report.tableId,
+      details: {
+        jobId: report.jobId,
+        targetMode: report.targetMode,
+        totalRows: report.totalRows,
+        insertedRows: report.insertedRows,
+        updatedRows: report.updatedRows,
+        skippedRows: report.skippedRows,
+      },
+    });
+    return report;
+  }, { rateLimit: "import" });
 }

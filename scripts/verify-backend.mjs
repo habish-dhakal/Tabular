@@ -111,12 +111,24 @@ async function main() {
 
   /* ---- auth guard ---- */
   const anon = makeSession();
-  check("unauth GET /api/workspaces → 401", (await anon.req("GET", "/api/workspaces")).status === 401);
+  const unauthWorkspaces = await anon.raw("GET", "/api/workspaces");
+  let unauthJson = null;
+  try { unauthJson = JSON.parse(unauthWorkspaces.text); } catch { /* no body */ }
+  check("unauth GET /api/workspaces -> 401", unauthWorkspaces.status === 401);
+  check("error envelope includes code + request id",
+    unauthJson?.code === "AUTH_REQUIRED" &&
+    typeof unauthJson?.requestId === "string" &&
+    unauthWorkspaces.headers.get("x-request-id") === unauthJson.requestId,
+    JSON.stringify(unauthJson));
 
   /* ---- health endpoint (unauthenticated, unthrottled) ---- */
   const health = await anon.req("GET", "/api/health");
   check("health endpoint returns 200", health.status === 200, String(health.status));
   check("health reports db up + status ok", health.json?.status === "ok" && health.json?.db === "up", JSON.stringify(health.json));
+  const live = await anon.req("GET", "/api/health/live");
+  check("liveness endpoint returns 200", live.status === 200 && live.json?.status === "ok", JSON.stringify(live.json));
+  const ready = await anon.req("GET", "/api/health/ready");
+  check("readiness endpoint returns 200", ready.status === 200 && ready.json?.status === "ok" && ready.json?.env?.ok === true, JSON.stringify(ready.json));
 
   /* ---- login + self-heal workspace ---- */
   const s = await login("verify@tabular.dev");

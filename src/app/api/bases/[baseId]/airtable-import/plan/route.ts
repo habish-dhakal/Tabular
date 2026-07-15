@@ -34,5 +34,5 @@ export async function POST(req: Request, { params }: Params) {
     const { baseId } = await params;
     await assertBaseAccess(userId, baseId, true);
     return previewAirtableImport(body.parse(await req.json()));
-  });
+  }, { rateLimit: "import" });
 }

@@ -2,7 +2,13 @@ import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { auth } from "@/server/auth";
 import { AccessError } from "@/server/services/access";
-import { checkRateLimit } from "@/server/rate-limit";
+import { envelopeForError, requestIdFromHeaders } from "@/server/errors";
+import {
+  checkRateLimit,
+  rateLimitConfigForAction,
+  rateLimitKey,
+  type RateLimitAction,
+} from "@/server/rate-limit";
 
 export async function requireUserId(): Promise<string> {
   const session = await auth();
@@ -10,44 +16,71 @@ export async function requireUserId(): Promise<string> {
   return session.user.id;
 }
 
-export function ok(data: unknown, init?: number) {
-  return NextResponse.json(data, { status: init ?? 200 });
+export function ok(data: unknown, init?: number, requestId?: string) {
+  return NextResponse.json(data, {
+    status: init ?? 200,
+    headers: requestId ? { "X-Request-ID": requestId } : undefined,
+  });
 }
 
 /** Best-effort client identifier for rate limiting: first x-forwarded-for hop,
  *  falling back to a shared bucket when no proxy header is present. */
-async function clientKey(): Promise<string> {
-  const h = await headers();
+function clientKey(h: { get(name: string): string | null }): string {
   const fwd = h.get("x-forwarded-for");
   if (fwd) return fwd.split(",")[0].trim();
   return h.get("x-real-ip") ?? "unknown";
 }
 
+export interface HandleOptions {
+  rateLimit?: RateLimitAction | "none";
+}
+
+function withRequestId(response: Response, requestId: string): Response {
+  const responseHeaders = new Headers(response.headers);
+  responseHeaders.set("X-Request-ID", requestId);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: responseHeaders,
+  });
+}
+
 /** Wrap a route handler so AccessError / thrown errors become clean JSON.
  *  Also enforces per-client rate limiting (no-op unless enabled — see
  *  rate-limit.ts). */
-export async function handle<T>(fn: () => Promise<T>) {
+export async function handle<T>(fn: () => Promise<T | Response>, options: HandleOptions = {}) {
+  const h = await headers();
+  const requestId = requestIdFromHeaders(h);
   try {
-    const rl = await checkRateLimit(await clientKey());
-    if (!rl.allowed) {
-      return NextResponse.json(
-        { error: "Too many requests — slow down and try again shortly." },
-        {
-          status: 429,
-          headers: {
-            "Retry-After": String(rl.retryAfterSec),
-            "X-RateLimit-Limit": String(rl.limit),
-            "X-RateLimit-Remaining": String(rl.remaining),
-          },
-        }
+    const action = options.rateLimit ?? "api";
+    if (action !== "none") {
+      const session = await auth();
+      const rl = await checkRateLimit(
+        rateLimitKey({ action, ip: clientKey(h), userId: session?.user?.id }),
+        rateLimitConfigForAction(action)
       );
+      if (!rl.allowed) {
+        return NextResponse.json(
+          { error: "Too many requests - slow down and try again shortly.", code: "RATE_LIMITED", requestId },
+          {
+            status: 429,
+            headers: {
+              "Retry-After": String(rl.retryAfterSec),
+              "X-RateLimit-Limit": String(rl.limit),
+              "X-RateLimit-Remaining": String(rl.remaining),
+              "X-Request-ID": requestId,
+            },
+          }
+        );
+      }
     }
-    return ok(await fn());
+    const result = await fn();
+    return result instanceof Response ? withRequestId(result, requestId) : ok(result, undefined, requestId);
   } catch (err) {
-    if (err instanceof AccessError) {
-      return NextResponse.json({ error: err.message }, { status: err.status });
-    }
-    const message = err instanceof Error ? err.message : "Unexpected error";
-    return NextResponse.json({ error: message }, { status: 400 });
+    const envelope = envelopeForError(err, requestId);
+    return NextResponse.json(envelope.body, {
+      status: envelope.status,
+      headers: { "X-Request-ID": requestId },
+    });
   }
 }

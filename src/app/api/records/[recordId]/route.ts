@@ -6,6 +6,7 @@ import { handle, requireUserId } from "@/server/api-helpers";
 import { AccessError, assertTableAccess } from "@/server/services/access";
 import { deleteRecord, updateRecordCells } from "@/server/services/records";
 import { enrichRecordsWithLinks } from "@/server/services/links";
+import { emitProductionSafetyEvent } from "@/server/production-events";
 
 type Params = { params: Promise<{ recordId: string }> };
 
@@ -42,6 +43,7 @@ export async function DELETE(_req: Request, { params }: Params) {
     const tableId = await tableIdForRecord(recordId);
     await assertTableAccess(userId, tableId, true);
     await deleteRecord(recordId);
+    emitProductionSafetyEvent({ kind: "record.delete", actorId: userId, tableId, recordId });
     return { ok: true };
-  });
+  }, { rateLimit: "destructive" });
 }

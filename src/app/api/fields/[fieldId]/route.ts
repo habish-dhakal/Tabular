@@ -5,6 +5,7 @@ import { fields, fieldTypes } from "@/server/db/schema";
 import { handle, requireUserId } from "@/server/api-helpers";
 import { AccessError, assertTableAccess } from "@/server/services/access";
 import { deleteField, updateField } from "@/server/services/fields";
+import { emitProductionSafetyEvent } from "@/server/production-events";
 
 type Params = { params: Promise<{ fieldId: string }> };
 
@@ -43,6 +44,7 @@ export async function DELETE(_req: Request, { params }: Params) {
     const tableId = await tableIdForField(fieldId);
     await assertTableAccess(userId, tableId, true);
     await deleteField(fieldId);
+    emitProductionSafetyEvent({ kind: "field.delete", actorId: userId, tableId, targetId: fieldId });
     return { ok: true };
-  });
+  }, { rateLimit: "destructive" });
 }

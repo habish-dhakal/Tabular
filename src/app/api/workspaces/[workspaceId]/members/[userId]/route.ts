@@ -2,6 +2,7 @@ import { z } from "zod";
 import { handle, requireUserId } from "@/server/api-helpers";
 import { assertWorkspaceAdminAccess } from "@/server/services/access";
 import { removeMember, updateMemberRole } from "@/server/services/members";
+import { emitProductionSafetyEvent } from "@/server/production-events";
 
 type Params = { params: Promise<{ workspaceId: string; userId: string }> };
 
@@ -24,6 +25,8 @@ export async function DELETE(_req: Request, { params }: Params) {
     const actorId = await requireUserId();
     const { workspaceId, userId } = await params;
     await assertWorkspaceAdminAccess(actorId, workspaceId);
-    return removeMember(workspaceId, userId);
-  });
+    const result = await removeMember(workspaceId, userId);
+    emitProductionSafetyEvent({ kind: "member.remove", actorId, workspaceId, targetId: userId });
+    return result;
+  }, { rateLimit: "destructive" });
 }

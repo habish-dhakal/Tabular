@@ -7,8 +7,8 @@ COMPOSE_PROD := docker compose -f docker-compose.prod.yml -p tabular-prod
 
 .DEFAULT_GOAL := help
 .PHONY: help setup install env up down restart db-wait migrate generate seed studio \
-        dev worker build start typecheck pre-commit verify verify-unit verify-logic verify-backend \
-        verify-frontend prod-up prod-down prod-logs reset clean
+        dev worker build start typecheck pre-commit verify verify-unit verify-logic verify-route-policy \
+        verify-backend verify-frontend verify-load prod-smoke prod-up prod-down prod-logs reset clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -77,7 +77,7 @@ pre-commit: typecheck verify ## Run the local gate before committing
 
 ## ---- Verify ------------------------------------------------------------
 
-verify: ## Run all verify suites (unit + logic + backend + frontend)
+verify: ## Run all verify suites (unit + logic + route-policy + backend + frontend)
 	npm run verify
 
 verify-unit: ## Vitest unit suite
@@ -86,11 +86,18 @@ verify-unit: ## Vitest unit suite
 verify-logic: ## Pure-logic QA suite (no server needed)
 	npm run verify:logic
 
+verify-route-policy: ## API route policy inventory gate
+	npm run verify:route-policy
+
 verify-backend: ## Backend integration suite (needs app on :3100)
 	npm run verify:backend
 
 verify-frontend: ## Puppeteer e2e suite (needs app on :3100 + Chrome)
 	npm run verify:frontend
+
+verify-load: ## k6 load smoke (needs app on BASE_URL or :3100)
+	@command -v k6 >/dev/null || (echo "k6 is required. Install it before running load gates." && exit 1)
+	k6 run scripts/load-test.js
 
 ## ---- Docker (production) ----------------------------------------------
 
@@ -102,6 +109,9 @@ prod-down: ## Stop the prod stack
 
 prod-logs: ## Tail prod stack logs
 	$(COMPOSE_PROD) logs -f
+
+prod-smoke: prod-up ## Start prod stack and run backend smoke against :3100
+	BASE_URL=http://localhost:3100 npm run verify:backend
 
 ## ---- Maintenance -------------------------------------------------------
 

@@ -50,5 +50,5 @@ export async function POST(req: Request, { params }: Params) {
     const input = createSchema.parse(await req.json());
     const id = await createAutomation(tableId, userId, input);
     return getAutomation(id);
-  });
+  }, { rateLimit: "automation" });
 }

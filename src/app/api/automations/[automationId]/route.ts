@@ -12,6 +12,7 @@ import {
   automationActionTypes,
   automationTriggerTypes,
 } from "@/server/db/schema";
+import { emitProductionSafetyEvent } from "@/server/production-events";
 import type { ActionInput } from "@/server/services/automations";
 
 type Params = { params: Promise<{ automationId: string }> };
@@ -59,15 +60,17 @@ export async function PATCH(req: Request, { params }: Params) {
     const input = patchSchema.parse(await req.json());
     await updateAutomation(automationId, input);
     return getAutomation(automationId);
-  });
+  }, { rateLimit: "automation" });
 }
 
 export async function DELETE(_req: Request, { params }: Params) {
   return handle(async () => {
     const userId = await requireUserId();
     const { automationId } = await params;
-    await assertTableAccess(userId, await tableFor(automationId), true);
+    const tableId = await tableFor(automationId);
+    await assertTableAccess(userId, tableId, true);
     await deleteAutomation(automationId);
+    emitProductionSafetyEvent({ kind: "automation.delete", actorId: userId, tableId, targetId: automationId });
     return { ok: true };
-  });
+  }, { rateLimit: "destructive" });
 }
