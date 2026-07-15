@@ -307,8 +307,9 @@ Research and migration notes:
   after a destructive preview, import snapshot, and rollback plan.
 - Airtable documents import limits around CSV size and row count. Tabular's
   internal target is larger because the questionnaire migration has 90k+ rows
-  and ongoing weekly growth, so Phase 6 must use import jobs instead of doing
-  large writes in a request/response UI path.
+  and ongoing weekly growth. Phase 6 makes the migration UX usable; the new
+  Phase 7 production gate must move large imports to durable jobs before the app
+  is trusted for production migration volume.
 - The real questionnaire export is a hard requirement, not a toy fixture: it
   has 52 parsed rows, 163 columns, embedded newlines, repeated customer names,
   repeated customer IDs, duplicated Airtable headers, SLA/status/date fields,
@@ -317,7 +318,7 @@ Research and migration notes:
 - Research on messy CSVs and spreadsheet relationalization shows that files in
   the wild often need dialect detection, semantic column profiling, and
   normalization suggestions before they become useful relational tables. Use
-  deterministic profiling first; reserve AI-assisted suggestions for Phase 11
+  deterministic profiling first; reserve AI-assisted suggestions for Phase 12
   after permissions, audit, and preview/approval are strong.
 
 Product guidance:
@@ -366,7 +367,7 @@ Product guidance:
   permissions.
 - Table deletion can be exposed only as a clear, confirmed action with current
   coarse edit permission. Fine-grained admin policy, soft delete, retention,
-  restore, and audit hardening move to Phase 8.
+  restore, and audit hardening move to Phase 9.
 
 Engineering guidance:
 
@@ -420,9 +421,10 @@ Engineering guidance:
   questionnaire back to its customer.
 - Preserve Airtable record IDs and source row numbers as metadata so parity
   checks, rollback, and audit can trace every migrated record.
-- Large imports must run as background jobs with chunked writes, progress,
-  cancellation, retry-safe idempotency, and a durable report. A request handler
-  should enqueue work and return job status, not hold the full migration open.
+- Large imports must become background jobs with chunked writes, progress,
+  cancellation, retry-safe idempotency, and a durable report in Phase 7. Small
+  imports may remain synchronous only if they use the same planner/report
+  contract and cannot bypass the job safety rules.
 - Import write paths must be transactional per chunk and must produce a clear
   failure mode: strict rollback, partial commit with skipped-row report, or
   cancelled job.
@@ -468,11 +470,279 @@ Required tests:
   without leaving the base on a broken active table.
 - `make pre-commit`.
 
-## Phase 7: Forms And Capture
+## Phase 0-6 Production Audit Findings
 
-Branch: `phase-07-forms-capture`
+This audit was added after inspecting upstream `main`, the eight open PR heads
+for our work, and the code shipped through Phase 6. It exists so Phase 7 is
+driven by concrete gaps, not guesswork.
 
-PR title: `Phase 7: Add forms and capture workflows`
+Phase 0 missed or deferred:
+
+- CI runs unit, logic, typecheck, and build, but not backend API verification,
+  frontend browser verification, Docker smoke, production-start smoke, k6/load,
+  or migration/import job checks.
+- There is no typed production environment validation layer. Missing or weak
+  `AUTH_SECRET`, `DATABASE_URL`, `REDIS_URL`, storage, proxy, and trusted-host
+  values can fail late.
+- `make pre-commit` is strong locally, but production-readiness gates are not
+  separated into quick, full, load, smoke, and release gates.
+- PR templates require OWASP notes, but there is no route inventory proving each
+  route has authn, authz, validation, rate-limit classification, and tests.
+
+Phase 1 missed or deferred:
+
+- The value engine is a major improvement, but value parsing still needs
+  fuzz/property tests for import/export/display/query round trips.
+- The duration import bug showed that canonical normalization must be
+  idempotent and unit-aware. Phase 7 must add regression fixtures around
+  real Airtable values, not only toy samples.
+- Error handling still returns plain strings from many service errors. A
+  production app needs stable error codes and safe public messages.
+- Formula/lookup/rollup correctness needs larger dependency, recompute, and
+  parity fixtures before migration trust.
+
+Phase 2 missed or deferred:
+
+- Grid helpers are cleaner, but production grid behavior still needs keyboard,
+  paste, undo/redo, selection, and pagination tests against server-paged views.
+- Undo/redo is client-local and not yet tied to conflict detection, revisions,
+  or multi-user edits.
+- Large-grid browser performance needs measured budgets for 90k-row bases and
+  very wide imports.
+- Accessibility and focus behavior need a keyboard/screen-reader pass before
+  the grid becomes the daily operational tool.
+
+Phase 3 missed or deferred:
+
+- Attachments are metadata-only. There is no real upload adapter, signed upload
+  flow, storage lifecycle, malware scanning worker, quarantine, or retention.
+- Field options are mostly JSON blobs. Production needs per-type option schemas
+  and migration-safe validation.
+- Required/unique rules are service-level checks. At scale they need stronger
+  race-condition protection, measured query behavior, and clear conflict
+  errors.
+- Field/table deletes are hard-destructive and depend on cleanup behavior, not
+  audit-backed soft-delete/restore.
+
+Phase 4 missed or deferred:
+
+- CSV parsing handles key Airtable quirks, but backend imports still need
+  server-side row/column limits, dialect/encoding reporting, and large-file
+  streaming or job-backed handling.
+- CSV export must explicitly protect against spreadsheet formula injection and
+  very large response memory pressure.
+- JSON backup exists, but production needs restore verification, backup
+  integrity checks, and operator runbooks.
+- Import/export route tests need cross-tenant, role, hidden-field, and
+  destructive-mode coverage for every path.
+
+Phase 5 missed or deferred:
+
+- Server-side view paging is in place, but sorted views still use offset
+  cursors and computed/relationship-heavy views fall back to a bounded
+  materialized scan.
+- Hot-field indexes, query telemetry, explain-plan capture, slow-query logging,
+  and 90k-row regression fixtures are not complete.
+- Hidden fields are projected out of view payloads, but route-wide permission
+  and export visibility tests still need expansion.
+- k6 exists, but it is not part of a production-readiness gate with seeded large
+  data and published thresholds.
+
+Phase 6 missed or deferred:
+
+- Migration UX is much better, but imports are still mostly synchronous service
+  operations. Large imports need durable jobs, progress, cancellation,
+  idempotency, retry, and durable reports.
+- Replace import is transactional, but production still needs snapshots,
+  rollback/restore, and audit before destructive table changes are trusted.
+- Merge imports need stronger duplicate-key handling, idempotency, transaction
+  boundaries, and rollback semantics.
+- Relationship inference is advisory only. Normalized multi-table execution
+  still needs approval, parity reporting, and link cardinality verification.
+- Table rename/delete exists, but delete is still hard delete. Admin policy,
+  soft delete, retention, restore, and audit move to Phase 9.
+- Invalid or stale base/table/view route states need graceful product recovery
+  instead of confusing empty or 404-looking states.
+
+## Phase 7: Production Readiness, Reliability, And Safety Gate
+
+Branch: `phase-07-production-readiness`
+
+PR title: `Phase 7: Add production readiness and reliability gate`
+
+Goal: turn the Phase 0-6 feature foundation into a production-safe baseline
+before building public forms, deeper permissions, automations, interfaces, or
+AI surfaces.
+
+This phase is intentionally not a shiny feature phase. It is the senior
+architect gate that makes Tabular boring in the best possible way: observable,
+recoverable, secure by default, load-tested, and honest about failure modes.
+
+Product guidance:
+
+- The app must be safe to run against real questionnaire data without depending
+  on developer knowledge or lucky manual steps.
+- A production user should never wonder whether an import is still running,
+  whether a destructive operation can be restored, whether a stale URL means
+  the app crashed, or whether hidden data leaked through export/query payloads.
+- Production readiness must be visible in the product: clear loading states,
+  progress states, empty/error states, retry actions, import reports, and
+  recovery paths.
+- Keep the UI restrained and operational. This phase should reduce confusion,
+  not add decorative surfaces.
+
+Engineering guidance:
+
+- Do not create a giant `production.ts` dumping ground. Add small owners:
+  - `env` owner for validated runtime configuration.
+  - `route-policy` or equivalent owner for route auth/rate-limit metadata.
+  - `import-job` owner for durable import execution and reports.
+  - `audit/event` owner for production safety events until Phase 9 deepens
+    full audit.
+  - `observability` owner for request IDs, structured logs, metrics, and
+    health/readiness checks.
+- Keep routes thin. Production checks must be route metadata plus shared
+  services, not copied `if` statements.
+- Use existing Next.js, Auth.js, Drizzle, BullMQ, Zod, and Makefile patterns
+  before adding custom machinery.
+- Do not write a custom queue, logger, metrics collector, CSV streamer, or
+  validator if a proven dependency/local helper already solves the problem.
+- Every hardening item needs a regression test or operational smoke check.
+
+Required implementation:
+
+- Production environment contract:
+  - Add typed env validation for app, database, auth, Redis, storage, email,
+    Slack/Google/Salesforce placeholders, and trusted URL/proxy settings.
+  - Make dev login impossible in production unless a deliberately named
+    local-only escape hatch is present and loudly rejected in CI/release smoke.
+  - Add startup diagnostics that fail fast on missing production-critical
+    secrets instead of failing during the first user action.
+  - Split health into liveness and readiness. Readiness must check database,
+    Redis/queue when enabled, and migration state.
+- Route inventory and security matrix:
+  - Generate or maintain a route inventory covering every `src/app/api/**`
+    route.
+  - Each route must declare authn, authz owner, validation schema, rate-limit
+    action, side-effect level, and test coverage.
+  - Add a verification script that fails when a new route is missing policy
+    metadata.
+  - Convert generic thrown errors that reach clients into safe public errors
+    with stable codes and request IDs.
+- Rate limiting and abuse controls:
+  - Replace IP-only rate limiting with policy keyed by user, workspace, base,
+    action, and IP fallback.
+  - Add separate policies for reads, writes, imports, exports, auth, comments,
+    automations, and destructive actions.
+  - Preserve local/k6 testing ergonomics so 200-300 virtual users behind one
+    client IP do not create false failures.
+  - Add backend tests for NAT/proxy scenarios and production-on defaults.
+- Durable import jobs:
+  - Introduce import job records and reports for large or destructive imports.
+  - Enqueue large imports through BullMQ or the existing worker infrastructure.
+  - Track progress, processed rows, created/updated/skipped rows, bad rows,
+    warnings, started/completed timestamps, actor, target table/base, and source
+    filename/hash when available.
+  - Add idempotency keys so refresh/retry does not duplicate imported rows.
+  - Add cancellation and retry-safe failure states.
+  - Keep small synchronous imports only as a wrapper around the same
+    planner/report contract.
+- Destructive-operation safety:
+  - Add safety events for table delete, field delete, replace import, bulk
+    import, export, and base/table rename.
+  - Add lightweight snapshots or restore data for replace import and table
+    delete where feasible.
+  - Keep full soft-delete/admin/audit policy in Phase 9, but do not let Phase 7
+    ship destructive behavior without traceability and recovery notes.
+  - Block accidental double-submit for destructive actions at both UI and API
+    levels.
+- Data integrity and validation:
+  - Add per-field option schemas so invalid field config cannot be saved by API,
+    import mapping, or future form/interface builders.
+  - Add duplicate sibling-name checks for base/table/field/view names where the
+    product expects uniqueness or clear disambiguation.
+  - Add optimistic concurrency or version checks for view config, field config,
+    and record updates that are likely to conflict.
+  - Add import/export round-trip tests for dates, durations, select options,
+    duplicate headers, formula-looking text, and hidden fields.
+  - Fix CSV export formula injection if any dangerous leading characters can
+    reach spreadsheets unescaped.
+- Scale and performance gates:
+  - Add deterministic large-data fixtures for 90k records, wide tables, and
+    questionnaire-shaped imports.
+  - Add `make verify-load` and document k6 installation/fallback behavior.
+  - Add thresholds for p95/p99 route latency, error rate, browser render time,
+    memory, and view query modes.
+  - Capture slow query telemetry for view reads, exports, imports, and record
+    writes.
+  - Add measured plans for hot-field JSONB indexes before creating indexes.
+- CI/release gates:
+  - Add a full CI job that runs typecheck, unit, logic, backend, frontend, and
+    build with service containers.
+  - Add a release smoke gate for `make prod-up`, migrations, health readiness,
+    login, open base, import small CSV, export CSV, and shutdown.
+  - Keep quick PR gates fast, but make the full gate easy to run and required
+    before a production-tagged release.
+- Observability:
+  - Add request IDs to responses and logs.
+  - Add structured logs for route errors, imports, exports, destructive actions,
+    worker jobs, and slow queries.
+  - Add metrics counters/timers for view queries, import jobs, automation queue,
+    error rates, and rate-limit decisions.
+  - Add an operator-facing worker/job health surface or JSON endpoint.
+- Backup and recovery:
+  - Add Makefile targets and docs for backup, restore, verify-restore, and
+    emergency export.
+  - Add a restore smoke test against a throwaway database or documented local
+    flow.
+  - Document rollback for every destructive production operation.
+- UX reliability:
+  - Add graceful stale base/table/view handling with a clear "not found or no
+    access" state and navigation back to available bases.
+  - Add consistent loading, empty, error, retry, and disabled states for imports,
+    views, table tabs, field actions, and delete/replace flows.
+  - Add browser checks for refresh/back/forward after import, deleted table,
+    renamed table, stale route, and wide-grid scroll.
+
+Required tests:
+
+- Env validation rejects missing production secrets and weak `AUTH_SECRET`.
+- Dev login is unavailable in production release smoke.
+- Every API route appears in the route inventory with authn/authz/validation/
+  rate-limit metadata.
+- Cross-tenant read/write/export/import/delete checks cover every route family
+  built through Phase 6.
+- Client-safe errors include stable error codes and request IDs without leaking
+  stack traces or raw database errors.
+- Rate limits work by user/workspace/action and pass a 300-user NAT/proxy load
+  scenario.
+- Large questionnaire-shaped import enqueues a job, reports progress, supports
+  cancellation, and resumes/retries without duplicate records.
+- Replace import creates a recoverable snapshot or documented restore report.
+- CSV export escapes spreadsheet-formula-leading characters.
+- 90k-row seeded view passes backend and browser performance thresholds.
+- k6 read/write/import smoke passes documented thresholds.
+- Production Docker smoke passes: migrate, start, readiness, login, base open,
+  import/export, worker health, shutdown.
+- Stale table/view/base URLs recover gracefully.
+- `make pre-commit`.
+- `make verify-load`.
+- `make prod-smoke` or equivalent release smoke target.
+
+Out of scope:
+
+- Fine-grained configurable permissions UI.
+- Full audit log product surface.
+- Public forms.
+- Full attachment storage provider rollout.
+- Full normalized multi-table Airtable import execution.
+- AI-assisted import/schema generation.
+
+## Phase 8: Forms And Capture
+
+Branch: `phase-08-forms-capture`
+
+PR title: `Phase 8: Add forms and capture workflows`
 
 Goal: turn form view into a secure intake product.
 
@@ -496,11 +766,11 @@ Required tests:
 - Form trigger fires once.
 - `make pre-commit`.
 
-## Phase 8: Permissions, Collaboration, And Audit
+## Phase 9: Permissions, Collaboration, And Audit
 
-Branch: `phase-08-permissions-audit`
+Branch: `phase-09-permissions-audit`
 
-PR title: `Phase 8: Add permissions, collaboration, and audit`
+PR title: `Phase 9: Add permissions, collaboration, and audit`
 
 Goal: make access control trustworthy.
 
@@ -537,11 +807,11 @@ Required tests:
 - 300-user NAT/proxy rate-limit scenario is safe.
 - `make pre-commit`.
 
-## Phase 9: Automations Reliability
+## Phase 10: Automations Reliability
 
-Branch: `phase-09-automations-reliability`
+Branch: `phase-10-automations-reliability`
 
-PR title: `Phase 9: Harden automations reliability`
+PR title: `Phase 10: Harden automations reliability`
 
 Goal: make automations dependable for SLA and integration workflows.
 
@@ -564,11 +834,11 @@ Required tests:
 - Queue depth and run lag are visible.
 - `make pre-commit`.
 
-## Phase 10: Interfaces And App Builder
+## Phase 11: Interfaces And App Builder
 
-Branch: `phase-10-interfaces-app-builder`
+Branch: `phase-11-interfaces-app-builder`
 
-PR title: `Phase 10: Add interfaces and app builder`
+PR title: `Phase 11: Add interfaces and app builder`
 
 Goal: build role-specific apps on existing primitives.
 
@@ -589,11 +859,11 @@ Required tests:
 - Hidden and forbidden fields remain hidden.
 - `make pre-commit`.
 
-## Phase 11: Platform, Sync, And AI-Ready Core
+## Phase 12: Platform, Sync, And AI-Ready Core
 
-Branch: `phase-11-platform-ai-core`
+Branch: `phase-12-platform-ai-core`
 
-PR title: `Phase 11: Add platform, sync, and AI-ready core`
+PR title: `Phase 12: Add platform, sync, and AI-ready core`
 
 Goal: expose Tabular safely to external tools and AI-native workflows.
 
