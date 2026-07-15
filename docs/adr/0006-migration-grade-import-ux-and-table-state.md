@@ -78,9 +78,10 @@ owned by the layout boundary: page and workspace containers use constrained flex
 layouts, and the grid gets one clear scroll viewport for large row/column sets.
 
 Inline table rename and confirmed table delete are accepted in Phase 6 as
-product-critical migration tools. They use existing table APIs and remain simple
-until Phase 8 centralizes field/table/base deletion policy, audit logging,
-soft-delete retention, and admin-only controls.
+product-critical migration tools. They use existing table APIs and remain simple.
+Phase 7 adds production safety guardrails, then Phase 9 centralizes
+field/table/base deletion policy, audit logging, soft-delete retention, and
+admin-only controls.
 
 ## Security And Privacy Considerations
 
@@ -93,9 +94,10 @@ soft-delete retention, and admin-only controls.
   formulas, scripts, or relationship rewrites.
 - Relationship suggestions are metadata only until a reviewed multi-table import
   flow exists.
-- Later Phase 8 work must add centralized delete permissions, audit records,
-  soft-delete retention, rate limits by user/workspace/action, and stronger
-  admin controls.
+- Phase 7 must add production safety guardrails, rate limits by
+  user/workspace/action, and recovery notes. Later Phase 9 work must add
+  centralized delete permissions, audit records, soft-delete retention, and
+  stronger admin controls.
 
 ## Testing Strategy
 
