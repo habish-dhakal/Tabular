@@ -167,6 +167,18 @@ export function valueForClipboard(field: FieldDTO, record: RecordDTO, fields: Fi
   return Array.isArray(value) ? value.join(", ") : value;
 }
 
+/**
+ * Clipboard cells are plain strings; multi-value fields are exported as a
+ * comma-joined list (see valueForClipboard). Split those back into an array so
+ * normalizeFieldValue can resolve each entry.
+ */
+function splitPasteInput(field: FieldDTO, raw: string): string | string[] {
+  const isMulti =
+    field.type === "multiSelect" || (field.type === "user" && field.options.allowMultiple === true);
+  if (!isMulti) return raw;
+  return raw.split(",").map((part) => part.trim()).filter(Boolean);
+}
+
 export function createPastePlan(
   matrix: string[][],
   start: GridCell,
@@ -183,13 +195,13 @@ export function createPastePlan(
       const record = records[row];
       const field = fields[col];
       if (!record || !field) continue;
-      if (isComputed(field.type) || field.type === "link") {
-        errors.push({ row, col, message: `"${field.name}" cannot be pasted into directly` });
-        continue;
-      }
+      // Skip read-only (computed/link) columns instead of aborting the whole
+      // paste — mirrors range-clear, and lets multi-column blocks paste over a
+      // grid that happens to contain a formula/link column.
+      if (isComputed(field.type) || field.type === "link") continue;
       try {
         const raw = matrix[r][c];
-        const value = raw === "" ? null : normalizeFieldValue(field.type, raw, field.options);
+        const value = raw === "" ? null : normalizeFieldValue(field.type, splitPasteInput(field, raw), field.options);
         patches.push({ recordId: record.id, fieldId: field.id, value, previousValue: record.cells[field.id] });
       } catch (err) {
         const message = err instanceof Error ? err.message : "Invalid value";

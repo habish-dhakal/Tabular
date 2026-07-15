@@ -6,7 +6,7 @@ import { Check, ExternalLink, Paperclip, Star, UserCircle } from "lucide-react";
 import type { FieldDTO } from "@/lib/types";
 import type { AttachmentMetadata } from "@/lib/attachments";
 import type { SelectChoice } from "@/lib/fields";
-import { isComputed } from "@/lib/fields";
+import { isComputed, safeHref } from "@/lib/fields";
 import { CellPopover } from "@/components/cell-editors/CellPopover";
 import { DatePicker } from "@/components/cell-editors/DatePicker";
 import { SelectMenu } from "@/components/cell-editors/SelectMenu";
@@ -123,8 +123,9 @@ export function CellDisplay({ field, value, expanded }: { field: FieldDTO; value
     case "url":
       // In the grid (non-expanded) render as styled text so clicking the cell
       // edits it; only make it a real navigating link when expanded.
-      return expanded ? (
-        <a href={String(value)} target="_blank" rel="noreferrer" className="break-words text-accent underline">
+      const urlHref = safeHref(value);
+      return expanded && urlHref ? (
+        <a href={urlHref} target="_blank" rel="noreferrer" className="break-words text-accent underline">
           {String(value)}
         </a>
       ) : (
@@ -206,13 +207,13 @@ export function CellDisplay({ field, value, expanded }: { field: FieldDTO; value
 
     case "button": {
       const label = String(field.options.label ?? value ?? "Open");
-      const url = String(field.options.url ?? "").trim();
+      const buttonHref = safeHref(field.options.url);
       const inner = (
         <span className="inline-flex items-center gap-1 rounded-md border border-border-token bg-surface px-2 py-1 text-xs font-medium">
-          {label} {url && <ExternalLink size={12} />}
+          {label} {buttonHref && <ExternalLink size={12} />}
         </span>
       );
-      return expanded && url ? <a href={url} target="_blank" rel="noreferrer">{inner}</a> : inner;
+      return expanded && buttonHref ? <a href={buttonHref} target="_blank" rel="noreferrer">{inner}</a> : inner;
     }
 
     default:

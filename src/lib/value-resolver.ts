@@ -40,6 +40,19 @@ function choiceName(field: FieldDTO, id: unknown): string {
   return choicesOf(field).find((choice) => choice.id === id)?.name ?? String(id);
 }
 
+/**
+ * Resolve a select value to a canonical choice by id first, then by
+ * (case-insensitive) name. Accepting the name lets clipboard round-trips and
+ * external pastes (which carry the display name, not the id) work.
+ */
+function matchChoice(choices: SelectChoice[], value: unknown): SelectChoice | undefined {
+  const s = String(value).trim();
+  return (
+    choices.find((choice) => choice.id === s) ??
+    choices.find((choice) => choice.name.toLowerCase() === s.toLowerCase())
+  );
+}
+
 function linkLabels(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return (value as LinkValue[]).map((chip) => chip.label ?? chip.id).filter(Boolean);
@@ -62,6 +75,7 @@ function looksLikeDate(value: unknown): boolean {
 function parseBoolean(value: unknown): boolean {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value !== 0;
+  if (value === undefined || value === null || value === "") return false;
   const s = String(value).toLowerCase();
   return !(s === "false" || s === "0" || s === "no" || s === "off");
 }
@@ -437,19 +451,19 @@ export function normalizeFieldValue(
 
     case "singleSelect": {
       const choices = (options.choices as SelectChoice[]) ?? [];
-      const idStr = String(value);
-      if (!choices.some((choice) => choice.id === idStr)) throw new Error("Unknown choice");
-      return idStr;
+      const match = matchChoice(choices, value);
+      if (!match) throw new Error("Unknown choice");
+      return match.id;
     }
 
     case "multiSelect": {
       const choices = (options.choices as SelectChoice[]) ?? [];
       const arr = Array.isArray(value) ? value : [value];
-      const ids = arr.map(String);
-      for (const choiceId of ids) {
-        if (!choices.some((choice) => choice.id === choiceId)) throw new Error("Unknown choice");
-      }
-      return ids;
+      return arr.map((entry) => {
+        const match = matchChoice(choices, entry);
+        if (!match) throw new Error("Unknown choice");
+        return match.id;
+      });
     }
 
     case "attachment":
@@ -486,7 +500,29 @@ export function makeRecordContext(
 function matchesOperator(value: unknown, op: FilterOp, target: unknown): boolean {
   if (op === "isEmpty") return isBlankValue(value);
   if (op === "isNotEmpty") return !isBlankValue(value);
-  if (isBlankValue(value)) return false;
+
+  // An incomplete filter (no target chosen) is a no-op that matches every row
+  // rather than silently emptying the view. A boolean/false target is NOT blank.
+  if (isBlankValue(target) && typeof target !== "boolean") return true;
+
+  // A blank cell only satisfies the negative/absence operators; positive
+  // match operators fail. This preserves pre-value-engine filter semantics
+  // (e.g. "checkbox is unchecked" must keep untouched rows).
+  if (isBlankValue(value)) {
+    switch (op) {
+      case "isNot":
+      case "doesNotContain":
+      case "hasNoneOf":
+      case "isNoneOf":
+      case "neq":
+        return true;
+      case "is":
+        // A blank checkbox equals an unchecked (false) target.
+        return typeof target === "boolean" ? target === false : false;
+      default:
+        return false;
+    }
+  }
 
   const vals = asArray(value);
   const targets = asArray(target);

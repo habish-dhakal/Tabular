@@ -237,9 +237,16 @@ async function commitReplaceCsvImport(
   const rowErrors = importRowErrors(plan);
   if (mode === "strict" && plan.invalidRows > 0) return blockedReport(plan, mode, "replace", tableId, await tableName(tableId), rowErrors);
 
+  const { cascadeDeleteFields, externalLinkFieldsInto } = await import("@/server/services/cleanup");
   return db.transaction(async (tx) => {
     const current = await tx.query.tables.findFirst({ where: eq(tables.id, tableId) });
     if (!current) throw new Error("Table not found");
+    // Replace recreates this table's fields with new ids, so link fields in
+    // *other* tables pointing here (and their dependent lookups/rollups) would
+    // dangle. Clean them up first — same closure deleteTable relies on — then
+    // wipe this table's own fields/records/views (own link edges cascade via FK).
+    const external = await externalLinkFieldsInto(tx, tableId);
+    if (external.length) await cascadeDeleteFields(tx, external);
     await tx.delete(records).where(eq(records.tableId, tableId));
     await tx.delete(fields).where(eq(fields.tableId, tableId));
     await tx.delete(views).where(eq(views.tableId, tableId));
@@ -283,6 +290,28 @@ async function commitMergeCsvImport(
   const rowErrors = importRowErrors(plan);
   if (mode === "strict" && plan.invalidRows > 0) return blockedReport(plan, mode, "merge", tableId, await tableName(tableId), rowErrors);
 
+  // The merge key is an existing field, so resolve it and validate every row's
+  // key BEFORE any write. Otherwise a blank key on (say) row 300 throws
+  // mid-loop in strict mode, leaving rows 1-299 and the new fields persisted —
+  // a half-applied "strict" import. Services here aren't transaction-aware, so
+  // this pre-flight is how we keep strict mode all-or-nothing.
+  const existingFields = await db.query.fields.findMany({ where: eq(fields.tableId, tableId), orderBy: asc(fields.position) }) as FieldDTO[];
+  const keyField = existingFields.find((field) => field.id === request.mergeFieldId);
+  if (!keyField) throw new Error("Merge field not found");
+
+  const validRows = plan.rows.filter((item) => item.valid);
+  const isBlankKey = (row: (typeof validRows)[number]) => {
+    const keyValue = row.cells[keyField.id];
+    return keyValue === undefined || keyValue === null || keyValue === "";
+  };
+  if (mode === "strict") {
+    const blankKeyRows = validRows.filter(isBlankKey);
+    if (blankKeyRows.length) {
+      for (const row of blankKeyRows) rowErrors.push({ row: row.index, errors: [`Merge field "${keyField.name}" is blank`] });
+      return blockedReport(plan, mode, "merge", tableId, await tableName(tableId), rowErrors);
+    }
+  }
+
   const createdFields: FieldDTO[] = [];
   const tempToFieldId = new Map<string, string>();
   for (const column of plan.columns) {
@@ -292,18 +321,15 @@ async function commitMergeCsvImport(
     tempToFieldId.set(column.tempFieldId, created.id);
   }
 
-  const tableFields = await db.query.fields.findMany({ where: eq(fields.tableId, tableId), orderBy: asc(fields.position) }) as FieldDTO[];
   const existing = (await listRecords(tableId, 100_000, 0)).map(toRecordDTO);
-  const keyField = tableFields.find((field) => field.id === request.mergeFieldId);
-  if (!keyField) throw new Error("Merge field not found");
   let insertedRows = 0;
   let updatedRows = 0;
-  for (const row of plan.rows.filter((item) => item.valid)) {
+  for (const row of validRows) {
     const cells = translateTempFieldIds(row.cells, tempToFieldId);
     const keyValue = cells[keyField.id];
     if (keyValue === undefined || keyValue === null || keyValue === "") {
+      // Only reachable in partial mode now — strict blocked above with no writes.
       rowErrors.push({ row: row.index, errors: [`Merge field "${keyField.name}" is blank`] });
-      if (mode === "strict") throw new Error(`Merge field "${keyField.name}" is blank`);
       continue;
     }
     const match = existing.find((record) => valuesEqual(record.cells[keyField.id], keyValue));

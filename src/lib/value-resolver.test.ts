@@ -66,6 +66,34 @@ describe("ValueResolver", () => {
     expect(evaluateCondition(rollup, 2, "gt", 3)).toBe(false);
   });
 
+  it("keeps blank cells for negative/absence operators (checkbox-is-unchecked regression)", () => {
+    const check = field("fld_done", "Done", "checkbox");
+    const text = field("fld_notes", "Notes", "singleLineText");
+    const multi = field("fld_tags", "Tags", "multiSelect", {
+      choices: [{ id: "c1", name: "A" }, { id: "c2", name: "B" }],
+    });
+
+    // Blank checkbox must match "is unchecked (false)".
+    expect(evaluateCondition(check, undefined, "is", false)).toBe(true);
+    expect(evaluateCondition(check, true, "is", false)).toBe(false);
+    // Blank cell satisfies negative/absence operators.
+    expect(evaluateCondition(text, undefined, "isNot", "Foo")).toBe(true);
+    expect(evaluateCondition(text, undefined, "doesNotContain", "x")).toBe(true);
+    expect(evaluateCondition(multi, undefined, "hasNoneOf", ["c1"])).toBe(true);
+    // But blank fails positive match operators.
+    expect(evaluateCondition(text, undefined, "is", "Foo")).toBe(false);
+    expect(evaluateCondition(text, undefined, "contains", "x")).toBe(false);
+  });
+
+  it("treats an incomplete filter (blank target) as a no-op", () => {
+    const num = field("fld_score", "Score", "number");
+    const text = field("fld_name", "Name", "singleLineText");
+    // Empty target must not silently empty the view.
+    expect(evaluateCondition(num, 5, "eq", "")).toBe(true);
+    expect(evaluateCondition(num, 5, "gt", "")).toBe(true);
+    expect(evaluateCondition(text, "Alpha", "is", "")).toBe(true);
+  });
+
   it("keeps linked record query and automation token values coherent", () => {
     const link = field("fld_link", "Related", "link");
     const resolver = new ValueResolver([link]);

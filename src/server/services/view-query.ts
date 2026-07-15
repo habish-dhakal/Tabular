@@ -252,6 +252,11 @@ function conditionWhereSql(field: FieldDTO, condition: FilterCondition): SQL | n
       return sql`not (${empty})`;
   }
 
+  // Date comparisons need parsed-date + same-day semantics (and tolerate mixed
+  // date/dateTime formats); a raw text compare diverges. Route them to the
+  // materialized fallback, which reuses the canonical client comparator.
+  if (field.type === "date" || field.type === "dateTime") return null;
+
   if (SCALAR_NUMBER_TYPES.has(field.type)) return numberConditionSql(field.id, condition);
   if (field.type === "checkbox") return booleanConditionSql(field.id, condition);
   if (field.type === "singleSelect") return selectConditionSql(field.id, condition);
@@ -303,9 +308,10 @@ function textConditionSql(fieldId: string, condition: FilterCondition): SQL | nu
   const target = String(condition.value ?? "");
   switch (condition.op) {
     case "is":
-      return sql`coalesce(${text}, '') = ${target}`;
+      // Case-insensitive to match the client comparator (value-resolver `is`).
+      return sql`lower(coalesce(${text}, '')) = ${target.toLowerCase()}`;
     case "isNot":
-      return sql`coalesce(${text}, '') <> ${target}`;
+      return sql`lower(coalesce(${text}, '')) <> ${target.toLowerCase()}`;
     case "contains":
       return ilikeSql(text, target);
     case "doesNotContain":
@@ -340,6 +346,10 @@ function sortOrderSql(fieldsById: Map<string, FieldDTO>, sorts: SortRule[] | und
   for (const sort of sorts) {
     const field = fieldsById.get(sort.fieldId);
     if (!field || !DB_FILTER_TYPES.has(field.type)) return null;
+    // singleSelect sorts by the configured option order (not the stored choice
+    // id), and dates need parsed-date ordering across mixed formats — both need
+    // the client comparator, so route these sorts to the materialized fallback.
+    if (field.type === "singleSelect" || field.type === "date" || field.type === "dateTime") return null;
     const expr = SCALAR_NUMBER_TYPES.has(field.type) ? cellNumber(field.id) : sql`lower(coalesce(${cellText(field.id)}, ''))`;
     order.push(sort.direction === "desc" ? desc(expr) : asc(expr));
   }

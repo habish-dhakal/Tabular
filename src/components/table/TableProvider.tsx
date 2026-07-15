@@ -40,7 +40,7 @@ interface TableCtx {
 
   tables: TableDTO[]; // sibling tables in the base (for link fields)
   commitCell: (recordId: string, fieldId: string, value: unknown) => Promise<void>;
-  commitCells: (patches: CellPatch[]) => Promise<void>;
+  commitCells: (patches: CellPatch[]) => Promise<boolean>;
   addRecord: (cells?: Record<string, unknown>) => Promise<RecordDTO | null>;
   deleteRecord: (recordId: string) => Promise<void>;
   setRecordLinks: (recordId: string, fieldId: string, chips: LinkChip[]) => Promise<void>;
@@ -89,6 +89,10 @@ export function TableProvider({
   const [views, setViews] = useState<ViewDTO[]>([]);
   const [tables, setTables] = useState<TableDTO[]>([]);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  // Latest views, readable inside fetchViewRecords without adding `views` to its
+  // deps (which would refetch records on every config change like a column resize).
+  const viewsRef = useRef<ViewDTO[]>([]);
+  viewsRef.current = views;
 
   useEffect(() => {
     let alive = true;
@@ -128,10 +132,14 @@ export function TableProvider({
     options: { append?: boolean; cursor?: string | null; search?: string } = {}
   ) => {
     setRecordLoading(true);
-    const params = new URLSearchParams({
-      limit: "500",
-      includeTotal: "true",
-    });
+    // Grid and List paginate with a "Load more" affordance; Kanban/Calendar/
+    // Gallery render every row at once, so they must load the full (bounded) set
+    // instead of silently showing only the first page.
+    const viewType = viewsRef.current.find((v) => v.id === viewId)?.type;
+    const paginated = viewType === "grid" || viewType === "list";
+    const params = new URLSearchParams({ includeTotal: "true" });
+    if (paginated) params.set("limit", "500");
+    else params.set("loadAll", "true");
     const search = options.search ?? viewSearch;
     if (search) params.set("search", search);
     if (options.cursor) params.set("cursor", options.cursor);
@@ -245,8 +253,8 @@ export function TableProvider({
     }
   }, [dialog, reloadRecords]);
 
-  const commitCells = useCallback(async (patches: CellPatch[]) => {
-    if (patches.length === 0) return;
+  const commitCells = useCallback(async (patches: CellPatch[]): Promise<boolean> => {
+    if (patches.length === 0) return true;
     const byRecord = new Map<string, CellPatch[]>();
     for (const patch of patches) byRecord.set(patch.recordId, [...(byRecord.get(patch.recordId) ?? []), patch]);
 
@@ -281,9 +289,14 @@ export function TableProvider({
         prev.map((record) => updated.find((next) => next?.id === record.id) ?? record)
       );
       await reloadRecords();
+      return true;
     } catch (err) {
+      // Some PATCHes may have partially succeeded; reload server truth so the
+      // grid never shows values the server rejected, and report failure so the
+      // caller does not record this edit on the undo stack.
       await reloadRecords();
       void dialog.alert({ title: "Cell update rejected", message: err instanceof Error ? err.message : "Failed" });
+      return false;
     }
   }, [dialog, reloadRecords]);
 

@@ -28,4 +28,21 @@ describe("csv helpers", () => {
   it("stringifies duplicate headers from positional rows", () => {
     expect(stringifyCsvMatrix(["Name", "Name"], [["First", "Second"]])).toBe("Name,Name\nFirst,Second");
   });
+
+  it("neutralizes CSV formula injection on export", () => {
+    expect(stringifyCsv(["Name"], [{ Name: "=cmd|'/c calc'!A1" }]))
+      .toBe("Name\n'=cmd|'/c calc'!A1");
+    // Danger char plus a comma still gets quoted after the guard.
+    expect(stringifyCsv(["Name"], [{ Name: "=A1,B2" }])).toBe("Name\n\"'=A1,B2\"");
+    expect(stringifyCsv(["Name"], [{ Name: "@SUM(A1)" }])).toBe("Name\n'@SUM(A1)");
+    // Ordinary values are untouched.
+    expect(stringifyCsv(["Name"], [{ Name: "Alpha" }])).toBe("Name\nAlpha");
+  });
+
+  it("strips a leading UTF-8 BOM so the first header maps cleanly", () => {
+    expect(parseCsv("﻿Name,Notes\nAlpha,Beta")).toEqual({
+      headers: ["Name", "Notes"],
+      rows: [{ Name: "Alpha", Notes: "Beta" }],
+    });
+  });
 });

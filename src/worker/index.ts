@@ -33,13 +33,22 @@ function evalConditions(
   return conjunction === "or" ? results.some(Boolean) : results.every(Boolean);
 }
 
+/** Enrich a raw cell snapshot so computed fields (link/lookup/rollup/count) resolve. */
+async function enrichConditionCells(
+  tableId: string,
+  recordId: string | null | undefined,
+  cells: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const rec = { id: recordId ?? "rec_ctx", cells: { ...cells } };
+  const [enriched] = await enrichRecords(tableId, [rec]);
+  return enriched.cells;
+}
+
 async function cellsForConditions(
   event: ChangeEvent
 ): Promise<Record<string, unknown>> {
   if (event.kind === "record.deleted" || !event.recordId) return event.kind === "record.deleted" ? event.before : {};
-  const rec = { id: event.recordId, cells: { ...event.after } };
-  const [enriched] = await enrichRecords(event.tableId, [rec]);
-  return enriched.cells;
+  return enrichConditionCells(event.tableId, event.recordId, event.after);
 }
 
 /** Does this automation's trigger fire for this event? */
@@ -47,7 +56,8 @@ function triggerMatches(
   automation: AutomationRow,
   event: ChangeEvent,
   fieldsById: Map<string, FieldDTO>,
-  conditionCells: Record<string, unknown>
+  conditionCells: Record<string, unknown>,
+  beforeConditionCells: Record<string, unknown>
 ): boolean {
   const cfg = automation.triggerConfig ?? {};
   switch (automation.triggerType) {
@@ -78,9 +88,12 @@ function triggerMatches(
       const conjunction = String(cfg.conjunction ?? "and");
       const after = evalConditions(conjunction, conditions, fieldsById, conditionCells);
       // "Entered" = did not match before, matches now. Creates have no before.
+      // `before` must be enriched too, or conditions on computed fields (which are
+      // blank in the raw snapshot) always read false and the trigger misfires on
+      // every qualifying update instead of only on the transition.
       const before =
         event.kind === "record.updated"
-          ? evalConditions(conjunction, conditions, fieldsById, event.before)
+          ? evalConditions(conjunction, conditions, fieldsById, beforeConditionCells)
           : false;
       return after && !before;
     }
@@ -113,13 +126,17 @@ async function processEvent(job: Job<ChangeEvent>): Promise<void> {
   })) as unknown as FieldDTO[];
   const fieldsById = new Map(tableFields.map((f) => [f.id, f]));
   const conditionCells = await cellsForConditions(event);
+  const beforeConditionCells =
+    event.kind === "record.updated"
+      ? await enrichConditionCells(event.tableId, event.recordId, event.before)
+      : {};
   const runEvent = event.kind === "record.deleted" ? event : { ...event, after: conditionCells };
 
   for (const automation of enabled) {
     // Loop guard: don't let an automation re-trigger itself via its own writes.
     if (event.kind === "record.updated" && event.sourceAutomationId === automation.id) continue;
 
-    if (!triggerMatches(automation, event, fieldsById, conditionCells)) continue;
+    if (!triggerMatches(automation, event, fieldsById, conditionCells, beforeConditionCells)) continue;
 
     try {
       await runAutomation(automation, runEvent);

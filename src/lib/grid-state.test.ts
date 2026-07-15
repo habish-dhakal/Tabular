@@ -85,6 +85,37 @@ describe("paste planning", () => {
     expect(plan.patches).toEqual([]);
     expect(plan.errors).toEqual([{ row: 0, col: 1, message: "\"Score\": Not a number" }]);
   });
+
+  it("round-trips select values pasted as their display names", () => {
+    const status = field("status", "Status", "singleSelect", {
+      choices: [{ id: "c_todo", name: "Todo" }, { id: "c_done", name: "Done" }],
+    });
+    const tags = field("tags", "Tags", "multiSelect", {
+      choices: [{ id: "t_a", name: "A" }, { id: "t_b", name: "B" }],
+    });
+    const rows = [record("r1")];
+    const plan = createPastePlan([["Done", "A, B"]], { row: 0, col: 0 }, rows, [status, tags]);
+
+    expect(plan.errors).toEqual([]);
+    expect(plan.patches).toEqual([
+      { recordId: "r1", fieldId: "status", value: "c_done", previousValue: undefined },
+      { recordId: "r1", fieldId: "tags", value: ["t_a", "t_b"], previousValue: undefined },
+    ]);
+  });
+
+  it("skips computed/link columns instead of blocking the whole paste", () => {
+    const fields = [
+      field("name", "Name", "singleLineText"),
+      field("formula", "Calc", "formula", { expression: "1" }),
+    ];
+    const rows = [record("r1")];
+    const plan = createPastePlan([["Alpha", "ignored"]], { row: 0, col: 0 }, rows, fields);
+
+    expect(plan.errors).toEqual([]);
+    expect(plan.patches).toEqual([
+      { recordId: "r1", fieldId: "name", value: "Alpha", previousValue: undefined },
+    ]);
+  });
 });
 
 describe("grid edit history", () => {

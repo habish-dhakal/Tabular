@@ -4,7 +4,10 @@ export interface ParsedCsv {
 }
 
 export function parseCsv(text: string): ParsedCsv {
-  const matrix = parseCsvMatrix(text);
+  // Strip a leading UTF-8 BOM (Excel exports almost always include one) so the
+  // first header matches existing field names instead of creating a duplicate.
+  const clean = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  const matrix = parseCsvMatrix(clean);
   if (matrix.length === 0) throw new Error("CSV is empty");
   const headers = uniqueCsvHeaders(matrix[0]);
 
@@ -90,7 +93,15 @@ export function stringifyCsvMatrix(headers: string[], rows: unknown[][]): string
   ].join("\n");
 }
 
+// Leading characters that make Excel/Google Sheets evaluate a cell as a
+// formula. Prefixing with a single quote neutralizes the injection while
+// keeping the value legible.
+const CSV_FORMULA_TRIGGERS = new Set(["=", "+", "-", "@", "\t", "\r"]);
+
 function escapeCsvCell(value: unknown): string {
-  const text = value === undefined || value === null ? "" : String(value);
+  let text = value === undefined || value === null ? "" : String(value);
+  if (text.length > 0 && CSV_FORMULA_TRIGGERS.has(text[0])) {
+    text = `'${text}`;
+  }
   return /[",\r\n]/.test(text) ? `"${text.replaceAll("\"", "\"\"")}"` : text;
 }

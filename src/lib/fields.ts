@@ -54,6 +54,30 @@ export function isComputed(type: FieldType): boolean {
 }
 
 /**
+ * Return a safe href for user-supplied URLs, or null if the scheme is unsafe.
+ * Only http/https/mailto/tel are allowed; javascript:, data:, vbscript:, etc.
+ * are rejected to prevent stored XSS via url/button fields.
+ */
+const SAFE_URL_SCHEMES = new Set(["http:", "https:", "mailto:", "tel:"]);
+export function safeHref(raw: unknown): string | null {
+  const value = String(raw ?? "").trim();
+  if (!value) return null;
+  // Relative URLs (no scheme, not starting with "//" or a control char) are safe.
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value)) {
+    try {
+      const scheme = new URL(value).protocol.toLowerCase();
+      return SAFE_URL_SCHEMES.has(scheme) ? value : null;
+    } catch {
+      return null;
+    }
+  }
+  // Reject scheme-relative ("//evil") and any leading control chars.
+  // eslint-disable-next-line no-control-regex
+  if (value.startsWith("//") || /^[\u0000-\u001f]/.test(value)) return null;
+  return value;
+}
+
+/**
  * Coerce/validate a raw incoming cell value into its canonical stored form.
  * Returns `undefined` to mean "clear the cell". Throws on invalid input.
  */

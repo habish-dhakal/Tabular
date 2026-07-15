@@ -151,8 +151,10 @@ export function GridView() {
 
   const applyPatches = useCallback(async (patches: CellPatch[], trackHistory = true) => {
     if (patches.length === 0) return;
-    if (trackHistory) setHistory((prev) => pushHistory(prev, patches));
-    await commitCells(patches);
+    // Record history only after the server accepts the write, so a rejected
+    // commit does not leave a phantom entry on the undo stack.
+    const ok = await commitCells(patches);
+    if (ok && trackHistory) setHistory((prev) => pushHistory(prev, patches));
   }, [commitCells]);
 
   const commitOne = useCallback((record: RecordDTO, field: FieldDTO, value: unknown) => {
