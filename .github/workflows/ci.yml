@@ -9,6 +9,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # tsc (typecheck) and next build are memory-heavy; the default runner heap
+      # OOMs ("Ineffective mark-compacts near heap limit"). Give Node 4 GB.
+      NODE_OPTIONS: --max-old-space-size=4096
 
     steps:
       - uses: actions/checkout@v4
